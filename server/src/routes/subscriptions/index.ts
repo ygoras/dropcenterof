@@ -26,16 +26,41 @@ export async function registerSubscriptionRoutes(app: FastifyInstance) {
     return subscription ?? { status: 'none' };
   });
 
-  // List all subscriptions (admin)
+  // List subscriptions (admin sees all, seller sees own)
   app.get('/api/subscriptions', {
-    preHandler: [authMiddleware, requireRole('admin', 'manager')],
-  }, async () => {
+    preHandler: [authMiddleware],
+  }, async (request) => {
+    const { tenantId, isAdmin } = getTenantFilter(request);
+    const query_params = request.query as { tenant_id?: string; status?: string };
+
+    // Sellers can only see their own
+    const filterTenantId = isAdmin ? (query_params.tenant_id || null) : tenantId;
+
+    let whereClause = '';
+    const params: unknown[] = [];
+    let idx = 1;
+
+    if (filterTenantId) {
+      whereClause = `WHERE s.tenant_id = $${idx}`;
+      params.push(filterTenantId);
+      idx++;
+    }
+
+    if (query_params.status) {
+      const statuses = query_params.status.split(',').map(s => s.trim());
+      whereClause += whereClause ? ' AND ' : 'WHERE ';
+      whereClause += `s.status IN (${statuses.map(() => `$${idx++}`).join(',')})`;
+      params.push(...statuses);
+    }
+
     return queryMany(
       `SELECT s.*, t.name as tenant_name, p.name as plan_name, p.price as plan_price
        FROM subscriptions s
        JOIN tenants t ON t.id = s.tenant_id
        JOIN plans p ON p.id = s.plan_id
-       ORDER BY s.created_at DESC`
+       ${whereClause}
+       ORDER BY s.created_at DESC`,
+      params
     );
   });
 

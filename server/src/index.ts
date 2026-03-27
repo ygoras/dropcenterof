@@ -8,6 +8,9 @@ import { testConnection } from './config/database.js';
 import { registerSecurityHeaders } from './middleware/securityHeaders.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import { logger } from './lib/logger.js';
+import { authMiddleware } from './middleware/auth.js';
+import { getTenantFilter } from './middleware/tenantScope.js';
+import { queryMany } from './lib/db.js';
 import { registerAuthRoutes } from './routes/auth/index.js';
 import { registerUserRoutes } from './routes/users/index.js';
 import { registerMlRoutes } from './routes/ml/index.js';
@@ -69,6 +72,36 @@ async function start() {
   await registerPickingRoutes(app);
   await registerShipmentRoutes(app);
   await registerSSERoutes(app);
+
+  // ─── Aliases for frontend compatibility ──────────────────────────
+  // Frontend calls /api/asaas-pix but backend has /api/payments/pix
+  app.post('/api/asaas-pix', { preHandler: [authMiddleware] }, async (request, reply) => {
+    // Forward to /api/payments/pix
+    const res = await app.inject({ method: 'POST', url: '/api/payments/pix', payload: request.body as object, headers: { authorization: request.headers.authorization ?? '' } });
+    reply.status(res.statusCode).send(JSON.parse(res.payload));
+  });
+
+  // Frontend calls /api/ml-listings but backend has /api/ml/listings
+  app.get('/api/ml-listings', { preHandler: [authMiddleware] }, async (request, reply) => {
+    const qs = request.url.split('?')[1] || '';
+    const res = await app.inject({ method: 'GET', url: `/api/ml/listings?${qs}`, headers: { authorization: request.headers.authorization ?? '' } });
+    reply.status(res.statusCode).send(JSON.parse(res.payload));
+  });
+
+  // Frontend calls /api/payments but backend has /api/payments/pix only — return empty for list
+  app.get('/api/payments', { preHandler: [authMiddleware] }, async (request) => {
+    const { tenantId } = getTenantFilter(request);
+    return queryMany(
+      `SELECT * FROM payments WHERE tenant_id = $1 ORDER BY created_at DESC LIMIT 50`,
+      [tenantId]
+    );
+  });
+
+  // Frontend calls /api/webhooks/asaas for Asaas webhooks
+  app.post('/api/webhooks/asaas', async (request, reply) => {
+    const res = await app.inject({ method: 'POST', url: '/api/payments/webhook', payload: request.body as object });
+    reply.status(res.statusCode).send(JSON.parse(res.payload));
+  });
 
   // Test DB connection
   try {
