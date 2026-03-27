@@ -1,6 +1,9 @@
 import pg from 'pg';
 import { env } from './env.js';
 
+// Parse NUMERIC/DECIMAL as JavaScript number instead of string
+pg.types.setTypeParser(1700, (val: string) => parseFloat(val));
+
 export const pool = new pg.Pool({
   connectionString: env.DATABASE_URL,
   max: 20,
