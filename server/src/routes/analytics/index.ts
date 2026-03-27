@@ -14,7 +14,7 @@ export async function registerAnalyticsRoutes(app: FastifyInstance) {
 
     const [orders, revenue, products, listings] = await Promise.all([
       queryOne(`SELECT COUNT(*) as total, COUNT(*) FILTER (WHERE status = 'pending') as pending FROM orders ${tenantCondition}`),
-      queryOne(`SELECT COALESCE(SUM(total_amount), 0) as total FROM orders ${tenantCondition} WHERE created_at >= DATE_TRUNC('month', NOW())`),
+      queryOne(`SELECT COALESCE(SUM(total), 0) as total FROM orders ${tenantCondition} WHERE created_at >= DATE_TRUNC('month', NOW())`),
       queryOne(`SELECT COUNT(*) as total FROM products ${tenantCondition}`),
       queryOne(`SELECT COUNT(*) as total, COUNT(*) FILTER (WHERE status = 'active') as active FROM ml_listings ${tenantCondition}`),
     ]);
@@ -29,7 +29,7 @@ export async function registerAnalyticsRoutes(app: FastifyInstance) {
     const [sellers, orders, revenue, subscriptions] = await Promise.all([
       queryOne(`SELECT COUNT(*) as total FROM tenants`),
       queryOne(`SELECT COUNT(*) as total, COUNT(*) FILTER (WHERE created_at >= DATE_TRUNC('month', NOW())) as this_month FROM orders`),
-      queryOne(`SELECT COALESCE(SUM(total_amount), 0) as total FROM orders WHERE created_at >= DATE_TRUNC('month', NOW())`),
+      queryOne(`SELECT COALESCE(SUM(total), 0) as total FROM orders WHERE created_at >= DATE_TRUNC('month', NOW())`),
       queryOne(`SELECT COUNT(*) as total, COUNT(*) FILTER (WHERE status = 'active') as active FROM subscriptions`),
     ]);
 
@@ -73,10 +73,10 @@ export async function registerAnalyticsRoutes(app: FastifyInstance) {
     const salesBySeller = await queryMany(
       `SELECT o.tenant_id, t.name as tenant_name,
               COUNT(DISTINCT o.id) as order_count,
-              COALESCE(SUM(o.total_amount), 0) as total_revenue,
+              COALESCE(SUM(o.total), 0) as total_revenue,
               0 as total_cost, 0 as total_shipping, 0 as total_fees,
-              COALESCE(SUM(o.total_amount), 0) as total_net,
-              CASE WHEN COUNT(DISTINCT o.id) > 0 THEN COALESCE(SUM(o.total_amount), 0) / COUNT(DISTINCT o.id) ELSE 0 END as avg_ticket,
+              COALESCE(SUM(o.total), 0) as total_net,
+              CASE WHEN COUNT(DISTINCT o.id) > 0 THEN COALESCE(SUM(o.total), 0) / COUNT(DISTINCT o.id) ELSE 0 END as avg_ticket,
               0 as items_sold
        FROM orders o
        JOIN tenants t ON t.id = o.tenant_id
@@ -88,9 +88,9 @@ export async function registerAnalyticsRoutes(app: FastifyInstance) {
     // Daily trend
     const dailyTrend = await queryMany(
       `SELECT DATE(o.created_at) as date,
-              COALESCE(SUM(o.total_amount), 0) as revenue,
+              COALESCE(SUM(o.total), 0) as revenue,
               COUNT(*) as orders,
-              COALESCE(SUM(o.total_amount), 0) as net
+              COALESCE(SUM(o.total), 0) as net
        FROM orders o
        WHERE 1=1 ${dateCondition} ${tenantCondition}
        GROUP BY DATE(o.created_at)
@@ -99,11 +99,11 @@ export async function registerAnalyticsRoutes(app: FastifyInstance) {
 
     // Totals
     const totalsRow = await queryOne(
-      `SELECT COALESCE(SUM(total_amount), 0) as revenue,
+      `SELECT COALESCE(SUM(total), 0) as revenue,
               0 as cost, 0 as shipping, 0 as fees,
-              COALESCE(SUM(total_amount), 0) as net,
+              COALESCE(SUM(total), 0) as net,
               COUNT(*) as orders, 0 as items_sold,
-              CASE WHEN COUNT(*) > 0 THEN COALESCE(SUM(total_amount), 0) / COUNT(*) ELSE 0 END as avg_ticket
+              CASE WHEN COUNT(*) > 0 THEN COALESCE(SUM(total), 0) / COUNT(*) ELSE 0 END as avg_ticket
        FROM orders o
        WHERE 1=1 ${dateCondition} ${tenantCondition}`
     );
