@@ -1,21 +1,20 @@
 import type { FastifyInstance } from 'fastify';
 import { authMiddleware } from '../../middleware/auth.js';
 import { queryMany, query } from '../../lib/db.js';
-import { getTenantFilter } from '../../middleware/tenantScope.js';
 
 export async function registerNotificationRoutes(app: FastifyInstance) {
   // List notifications
   app.get('/api/notifications', {
     preHandler: [authMiddleware],
   }, async (request) => {
-    const userId = request.user.sub;
+    const tenantId = request.user.tenantId;
 
     return queryMany(
       `SELECT * FROM notifications
-       WHERE user_id = $1
+       WHERE tenant_id = $1
        ORDER BY created_at DESC
        LIMIT 50`,
-      [userId]
+      [tenantId]
     );
   });
 
@@ -24,11 +23,11 @@ export async function registerNotificationRoutes(app: FastifyInstance) {
     preHandler: [authMiddleware],
   }, async (request) => {
     const { notificationId } = request.params as { notificationId: string };
-    const userId = request.user.sub;
+    const tenantId = request.user.tenantId;
 
     await query(
-      `UPDATE notifications SET read = true WHERE id = $1 AND user_id = $2`,
-      [notificationId, userId]
+      `UPDATE notifications SET read = true WHERE id = $1 AND tenant_id = $2`,
+      [notificationId, tenantId]
     );
 
     return { success: true };
@@ -38,11 +37,11 @@ export async function registerNotificationRoutes(app: FastifyInstance) {
   app.patch('/api/notifications/read-all', {
     preHandler: [authMiddleware],
   }, async (request) => {
-    const userId = request.user.sub;
+    const tenantId = request.user.tenantId;
 
     await query(
-      `UPDATE notifications SET read = true WHERE user_id = $1 AND read = false`,
-      [userId]
+      `UPDATE notifications SET read = true WHERE tenant_id = $1 AND read = false`,
+      [tenantId]
     );
 
     return { success: true };

@@ -102,7 +102,7 @@ export async function registerUserRoutes(app: FastifyInstance) {
     preHandler: [authMiddleware, requireRole('admin', 'manager')],
   }, async (request) => {
     const sellers = await queryMany(
-      `SELECT p.id, p.email, p.full_name, p.tenant_id, p.avatar_url, p.created_at,
+      `SELECT p.id, p.email, p.name, p.tenant_id, p.avatar_url, p.created_at,
               t.name as store_name, t.document, t.phone,
               s.status as subscription_status, s.plan_id,
               pl.name as plan_name
@@ -122,7 +122,7 @@ export async function registerUserRoutes(app: FastifyInstance) {
     preHandler: [authMiddleware, requireRole('admin', 'manager')],
   }, async (request) => {
     const operators = await queryMany(
-      `SELECT p.id, p.email, p.full_name, p.created_at
+      `SELECT p.id, p.email, p.name, p.created_at
        FROM profiles p
        JOIN user_roles ur ON ur.user_id = p.id
        WHERE ur.role = 'operator'

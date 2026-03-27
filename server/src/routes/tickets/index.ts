@@ -29,7 +29,7 @@ export async function registerTicketRoutes(app: FastifyInstance) {
     }
 
     return queryMany(
-      `SELECT t.*, p.full_name as created_by_name
+      `SELECT t.*, p.name as created_by_name
        FROM support_tickets t
        LEFT JOIN profiles p ON p.id = t.created_by
        ${tenantWhere}
@@ -67,7 +67,7 @@ export async function registerTicketRoutes(app: FastifyInstance) {
   }, async (request) => {
     const { ticketId } = request.params as { ticketId: string };
     return queryMany(
-      `SELECT m.*, p.full_name as sender_name
+      `SELECT m.*, p.name as sender_name
        FROM support_messages m
        LEFT JOIN profiles p ON p.id = m.sender_id
        WHERE m.ticket_id = $1

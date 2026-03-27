@@ -24,7 +24,7 @@ export async function registerAuditRoutes(app: FastifyInstance) {
     params.push(limitVal, offsetVal);
 
     return queryMany(
-      `SELECT al.*, p.full_name as user_name
+      `SELECT al.*, p.name as user_name
        FROM audit_logs al
        LEFT JOIN profiles p ON p.id = al.user_id
        ${whereClause}
