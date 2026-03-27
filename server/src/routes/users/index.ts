@@ -103,7 +103,7 @@ export async function registerUserRoutes(app: FastifyInstance) {
   }, async (request) => {
     const sellers = await queryMany(
       `SELECT p.id, p.email, p.name, p.tenant_id, p.avatar_url, p.created_at,
-              t.name as store_name, t.document, t.phone,
+              t.name as store_name, t.document, p.phone,
               s.status as subscription_status, s.plan_id,
               pl.name as plan_name
        FROM profiles p
