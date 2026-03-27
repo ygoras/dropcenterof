@@ -86,6 +86,94 @@ export async function registerUserRoutes(app: FastifyInstance) {
     }
   });
 
+  // Update seller (admin only) — toggle active, edit fields
+  app.patch('/api/users/sellers/:sellerId', {
+    preHandler: [authMiddleware, requireRole('admin', 'manager')],
+  }, async (request, reply) => {
+    const { sellerId } = request.params as { sellerId: string };
+    const body = request.body as {
+      is_active?: boolean;
+      name?: string;
+      phone?: string;
+      company_name?: string;
+      company_document?: string;
+    } | null;
+
+    if (!body || Object.keys(body).length === 0) {
+      return reply.status(400).send({ error: 'Nada para atualizar' });
+    }
+
+    // Get profile to find tenant_id
+    const profile = await queryOne<{ tenant_id: string | null }>(
+      `SELECT tenant_id FROM profiles WHERE id = $1`,
+      [sellerId]
+    );
+
+    if (!profile) {
+      return reply.status(404).send({ error: 'Vendedor não encontrado' });
+    }
+
+    // Update profile fields
+    if (body.name || body.phone) {
+      const updates: string[] = [];
+      const params: unknown[] = [];
+      let idx = 1;
+      if (body.name) { updates.push(`name = $${idx++}`); params.push(body.name); }
+      if (body.phone) { updates.push(`phone = $${idx++}`); params.push(body.phone); }
+      params.push(sellerId);
+      await query(
+        `UPDATE profiles SET ${updates.join(', ')} WHERE id = $${idx}`,
+        params
+      );
+    }
+
+    // Update tenant fields
+    if (profile.tenant_id && (body.is_active !== undefined || body.company_name || body.company_document)) {
+      const updates: string[] = [];
+      const params: unknown[] = [];
+      let idx = 1;
+      if (body.is_active !== undefined) {
+        updates.push(`status = $${idx++}`);
+        params.push(body.is_active ? 'active' : 'suspended');
+      }
+      if (body.company_name) { updates.push(`name = $${idx++}`); params.push(body.company_name); }
+      if (body.company_document) { updates.push(`document = $${idx++}`); params.push(body.company_document); }
+      params.push(profile.tenant_id);
+      await query(
+        `UPDATE tenants SET ${updates.join(', ')}, updated_at = NOW() WHERE id = $${idx}`,
+        params
+      );
+    }
+
+    return { success: true };
+  });
+
+  // Delete seller (admin only)
+  app.delete('/api/users/sellers/:sellerId', {
+    preHandler: [authMiddleware, requireRole('admin', 'manager')],
+  }, async (request, reply) => {
+    const { sellerId } = request.params as { sellerId: string };
+
+    const profile = await queryOne<{ tenant_id: string | null }>(
+      `SELECT tenant_id FROM profiles WHERE id = $1`,
+      [sellerId]
+    );
+
+    if (!profile) {
+      return reply.status(404).send({ error: 'Vendedor não encontrado' });
+    }
+
+    // Soft delete: suspend tenant
+    if (profile.tenant_id) {
+      await query(`UPDATE tenants SET status = 'suspended', updated_at = NOW() WHERE id = $1`, [profile.tenant_id]);
+    }
+
+    // Delete auth user (cascades to profiles, user_roles via FK)
+    await query(`DELETE FROM auth_users WHERE id = $1`, [sellerId]);
+
+    return { success: true };
+  });
+
   // Create operator (admin only)
   app.post('/api/users/operators', {
     preHandler: [authMiddleware, requireRole('admin', 'manager'), validateBody(createOperatorSchema)],
