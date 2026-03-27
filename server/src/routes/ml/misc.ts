@@ -478,65 +478,46 @@ export async function registerMlMiscRoutes(app: FastifyInstance) {
     preHandler: [authMiddleware, requireRole('admin', 'manager')],
   }, async (request, reply) => {
     try {
-      // Get credential stats
-      const credStats = await queryOne<{ total: string; active: string; expired: string }>(
-        `SELECT
-           COUNT(*) as total,
-           COUNT(*) FILTER (WHERE expires_at > NOW()) as active,
-           COUNT(*) FILTER (WHERE expires_at <= NOW()) as expired
-         FROM ml_credentials`
+      // Frontend expects raw arrays: profiles, credentials, listings, tenants, sellerRoles, orders
+      const profiles = await queryMany(
+        `SELECT p.id, p.name, p.email, p.tenant_id FROM profiles p`
       );
 
-      // Get listing stats
-      const listingStats = await queryOne<{
-        total: string; active: string; paused: string; closed: string; error_count: string;
-      }>(
-        `SELECT
-           COUNT(*) as total,
-           COUNT(*) FILTER (WHERE status = 'active') as active,
-           COUNT(*) FILTER (WHERE status = 'paused') as paused,
-           COUNT(*) FILTER (WHERE status = 'closed') as closed,
-           COUNT(*) FILTER (WHERE sync_status = 'error') as error_count
-         FROM ml_listings`
+      const credentials = await queryMany(
+        `SELECT c.tenant_id, c.ml_nickname, c.ml_user_id, c.expires_at FROM ml_credentials c`
       );
 
-      // Get recent orders from ML
-      const recentOrders = await queryMany<{
-        id: string; order_number: string; status: string; total: number; created_at: string; tenant_id: string;
-      }>(
-        `SELECT id, order_number, status, total, created_at, tenant_id
+      const listings = await queryMany(
+        `SELECT l.id, l.title, l.price, l.status, l.sync_status, l.ml_item_id,
+                l.category_id, l.last_sync_at, l.created_at, l.tenant_id, l.product_id,
+                json_build_object('name', pr.name, 'sku', pr.sku, 'images', pr.images) as products
+         FROM ml_listings l
+         LEFT JOIN products pr ON pr.id = l.product_id`
+      );
+
+      const tenants = await queryMany(
+        `SELECT id, name FROM tenants`
+      );
+
+      const sellerRoles = await queryMany(
+        `SELECT user_id, role FROM user_roles WHERE role = 'seller'`
+      );
+
+      const orders = await queryMany(
+        `SELECT id, order_number, status, total, created_at, tenant_id, items
          FROM orders
          WHERE ml_order_id IS NOT NULL
          ORDER BY created_at DESC
-         LIMIT 20`
-      );
-
-      // Get tenants with ML connected
-      const connectedTenants = await queryMany<{
-        tenant_id: string; ml_nickname: string | null; ml_user_id: string;
-        expires_at: string; tenant_name: string | null;
-      }>(
-        `SELECT c.tenant_id, c.ml_nickname, c.ml_user_id, c.expires_at, t.name as tenant_name
-         FROM ml_credentials c
-         LEFT JOIN tenants t ON t.id = c.tenant_id
-         ORDER BY c.updated_at DESC`
+         LIMIT 100`
       );
 
       return reply.send({
-        credentials: {
-          total: Number(credStats?.total || 0),
-          active: Number(credStats?.active || 0),
-          expired: Number(credStats?.expired || 0),
-        },
-        listings: {
-          total: Number(listingStats?.total || 0),
-          active: Number(listingStats?.active || 0),
-          paused: Number(listingStats?.paused || 0),
-          closed: Number(listingStats?.closed || 0),
-          errors: Number(listingStats?.error_count || 0),
-        },
-        recent_orders: recentOrders,
-        connected_tenants: connectedTenants,
+        profiles,
+        credentials,
+        listings,
+        tenants,
+        sellerRoles,
+        orders,
       });
     } catch (err) {
       logger.error({ err }, 'ml-admin-overview error');
