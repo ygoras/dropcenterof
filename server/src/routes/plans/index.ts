@@ -83,7 +83,7 @@ export async function registerPlanRoutes(app: FastifyInstance) {
 
     params.push(planId);
     const plan = await queryOne(
-      `UPDATE plans SET ${setClauses.join(', ')}, updated_at = NOW() WHERE id = $${idx} RETURNING *`,
+      `UPDATE plans SET ${setClauses.join(', ')} WHERE id = $${idx} RETURNING *`,
       params
     );
 
