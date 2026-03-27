@@ -9,17 +9,29 @@ import { getTenantFilter } from '../../middleware/tenantScope.js';
 const createProductSchema = z.object({
   name: z.string().min(1),
   sku: z.string().optional(),
-  description: z.string().optional(),
+  description: z.string().nullable().optional(),
   cost_price: z.number().min(0).optional(),
   sale_price: z.number().min(0).optional(),
-  category_id: z.string().uuid().optional(),
+  sell_price: z.number().min(0).optional(),
+  category_id: z.string().nullable().optional(),
   images: z.array(z.string()).optional(),
   weight: z.number().min(0).optional(),
+  weight_kg: z.number().min(0).nullable().optional(),
   width: z.number().min(0).optional(),
   height: z.number().min(0).optional(),
   length: z.number().min(0).optional(),
-  status: z.enum(['active', 'inactive', 'draft']).default('draft'),
-});
+  dimensions: z.object({ length: z.number(), width: z.number(), height: z.number() }).nullable().optional(),
+  status: z.enum(['active', 'inactive', 'draft']).default('active'),
+  brand: z.string().nullable().optional(),
+  ml_category_id: z.string().nullable().optional(),
+  condition: z.string().nullable().optional(),
+  gtin: z.string().nullable().optional(),
+  warranty_type: z.string().nullable().optional(),
+  warranty_time: z.string().nullable().optional(),
+  initial_stock: z.number().min(0).optional(),
+  min_stock: z.number().min(0).optional(),
+  ml_listing_quantity: z.number().min(0).optional(),
+}).passthrough();
 
 const updateProductSchema = createProductSchema.partial();
 
@@ -82,16 +94,38 @@ export async function registerProductRoutes(app: FastifyInstance) {
   app.post('/api/products', {
     preHandler: [authMiddleware, requireRole('admin', 'manager', 'seller'), validateBody(createProductSchema)],
   }, async (request, reply) => {
-    const body = request.body as z.infer<typeof createProductSchema>;
+    const body = request.body as Record<string, any>;
     const tenantId = request.user.tenantId;
 
+    // Map frontend field names to DB columns
+    const salePrice = body.sale_price ?? body.sell_price ?? null;
+    const weight = body.weight ?? body.weight_kg ?? null;
+    const width = body.width ?? body.dimensions?.width ?? null;
+    const height = body.height ?? body.dimensions?.height ?? null;
+    const length = body.length ?? body.dimensions?.length ?? null;
+
     const product = await queryOne(
-      `INSERT INTO products (name, sku, description, cost_price, sale_price, category_id, images, weight, width, height, length, status, tenant_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+      `INSERT INTO products (name, sku, description, cost_price, sale_price, category_id, images, weight, width, height, length, status, tenant_id, brand, condition, gtin)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
        RETURNING *`,
-      [body.name, body.sku, body.description, body.cost_price, body.sale_price, body.category_id,
-       JSON.stringify(body.images ?? []), body.weight, body.width, body.height, body.length, body.status, tenantId]
+      [body.name, body.sku, body.description ?? null, body.cost_price ?? null, salePrice, body.category_id ?? null,
+       JSON.stringify(body.images ?? []), weight, width, height, length, body.status ?? 'active', tenantId,
+       body.brand ?? null, body.condition ?? 'new', body.gtin ?? null]
     );
+
+    if (!product) return reply.status(500).send({ error: 'Falha ao criar produto' });
+
+    // Create initial stock if provided
+    const initialStock = body.initial_stock ?? 0;
+    const minStock = body.min_stock ?? 5;
+    if (product) {
+      await query(
+        `INSERT INTO stock (product_id, quantity, reserved, min_quantity)
+         VALUES ($1, $2, 0, $3)
+         ON CONFLICT (product_id) DO UPDATE SET quantity = $2, min_quantity = $3`,
+        [product.id, initialStock, minStock]
+      );
+    }
 
     return reply.status(201).send(product);
   });
