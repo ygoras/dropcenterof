@@ -10,16 +10,19 @@ import { getTenantFilter } from '../../middleware/tenantScope.js';
 const createSellerSchema = z.object({
   email: z.string().email(),
   password: z.string().min(6),
-  fullName: z.string().min(2),
-  storeName: z.string().min(2),
-  phone: z.string().optional(),
-  document: z.string().optional(),
+  name: z.string().min(2),
+  company_name: z.string().min(2),
+  phone: z.string().nullable().optional(),
+  company_document: z.string().nullable().optional(),
+  plan_id: z.string().uuid().optional(),
+  billing_day: z.number().min(1).max(28).optional(),
 });
 
 const createOperatorSchema = z.object({
   email: z.string().email(),
   password: z.string().min(6),
-  fullName: z.string().min(2),
+  name: z.string().min(2),
+  phone: z.string().nullable().optional(),
 });
 
 export async function registerUserRoutes(app: FastifyInstance) {
@@ -34,7 +37,7 @@ export async function registerUserRoutes(app: FastifyInstance) {
       `INSERT INTO tenants (name, document, phone, settings)
        VALUES ($1, $2, $3, '{}')
        RETURNING id`,
-      [body.storeName, body.document ?? null, body.phone ?? null]
+      [body.company_name, body.company_document ?? null, body.phone ?? null]
     );
 
     if (!tenant) {
@@ -45,21 +48,23 @@ export async function registerUserRoutes(app: FastifyInstance) {
       const user = await authService.createUserWithRole(
         body.email,
         body.password,
-        body.fullName,
+        body.name,
         'seller',
         tenant.id
       );
 
-      // Create default subscription
-      const defaultPlan = await queryOne<{ id: string }>(
-        `SELECT id FROM plans WHERE is_default = true LIMIT 1`
-      );
+      // Create subscription with provided plan or default
+      const planId = body.plan_id;
+      const plan = planId
+        ? await queryOne<{ id: string }>(`SELECT id FROM plans WHERE id = $1`, [planId])
+        : await queryOne<{ id: string }>(`SELECT id FROM plans WHERE is_active = true ORDER BY price ASC LIMIT 1`);
 
-      if (defaultPlan) {
+      if (plan) {
+        const billingDay = body.billing_day || 10;
         await query(
-          `INSERT INTO subscriptions (tenant_id, plan_id, status, current_period_start, current_period_end)
-           VALUES ($1, $2, 'active', NOW(), NOW() + INTERVAL '30 days')`,
-          [tenant.id, defaultPlan.id]
+          `INSERT INTO subscriptions (tenant_id, plan_id, status, billing_day, current_period_start, current_period_end)
+           VALUES ($1, $2, 'active', $3, NOW(), NOW() + INTERVAL '30 days')`,
+          [tenant.id, plan.id, billingDay]
         );
       }
 
@@ -83,7 +88,7 @@ export async function registerUserRoutes(app: FastifyInstance) {
       const user = await authService.createUserWithRole(
         body.email,
         body.password,
-        body.fullName,
+        body.name,
         'operator'
       );
 
@@ -198,6 +203,65 @@ export async function registerUserRoutes(app: FastifyInstance) {
     await query(`DELETE FROM profiles WHERE id = $1`, [userId]);
     await query(`DELETE FROM auth_users WHERE id = $1`, [userId]);
 
+    return reply.send({ success: true });
+  });
+
+  // ─── Operator aliases (frontend uses /api/operators) ──────────────
+  app.get('/api/operators', {
+    preHandler: [authMiddleware, requireRole('admin', 'manager')],
+  }, async () => {
+    return queryMany(
+      `SELECT p.id, p.email, p.name, p.phone, p.is_active, p.created_at
+       FROM profiles p
+       JOIN user_roles ur ON ur.user_id = p.id
+       WHERE ur.role = 'operator'
+       ORDER BY p.created_at DESC`
+    );
+  });
+
+  app.post('/api/operators', {
+    preHandler: [authMiddleware, requireRole('admin', 'manager'), validateBody(createOperatorSchema)],
+  }, async (request, reply) => {
+    const body = request.body as z.infer<typeof createOperatorSchema>;
+    try {
+      const user = await authService.createUserWithRole(body.email, body.password, body.name, 'operator');
+      return reply.status(201).send(user);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : '';
+      if (message.includes('duplicate key') || message.includes('unique')) {
+        return reply.status(409).send({ error: 'Email já cadastrado' });
+      }
+      throw err;
+    }
+  });
+
+  app.patch('/api/operators/:operatorId', {
+    preHandler: [authMiddleware, requireRole('admin', 'manager')],
+  }, async (request, reply) => {
+    const { operatorId } = request.params as { operatorId: string };
+    const body = request.body as { name?: string; phone?: string; is_active?: boolean };
+
+    const sets: string[] = [];
+    const params: unknown[] = [];
+    if (body.name !== undefined) { params.push(body.name); sets.push(`name = $${params.length}`); }
+    if (body.phone !== undefined) { params.push(body.phone); sets.push(`phone = $${params.length}`); }
+    if (body.is_active !== undefined) { params.push(body.is_active); sets.push(`is_active = $${params.length}`); }
+
+    if (sets.length === 0) return reply.send({ success: true });
+
+    params.push(operatorId);
+    await query(`UPDATE profiles SET ${sets.join(', ')} WHERE id = $${params.length}`, params);
+    return reply.send({ success: true });
+  });
+
+  app.delete('/api/operators/:operatorId', {
+    preHandler: [authMiddleware, requireRole('admin')],
+  }, async (request, reply) => {
+    const { operatorId } = request.params as { operatorId: string };
+    await authService.revokeAllUserTokens(operatorId);
+    await query(`DELETE FROM user_roles WHERE user_id = $1`, [operatorId]);
+    await query(`DELETE FROM profiles WHERE id = $1`, [operatorId]);
+    await query(`DELETE FROM auth_users WHERE id = $1`, [operatorId]);
     return reply.send({ success: true });
   });
 }
