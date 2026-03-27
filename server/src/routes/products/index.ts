@@ -126,10 +126,10 @@ export async function registerProductRoutes(app: FastifyInstance) {
     const minStock = body.min_stock ?? 5;
     if (product) {
       await query(
-        `INSERT INTO stock (product_id, quantity, reserved, min_quantity)
-         VALUES ($1, $2, 0, $3)
-         ON CONFLICT (product_id) DO UPDATE SET quantity = $2, min_quantity = $3`,
-        [product.id, initialStock, minStock]
+        `INSERT INTO stock (product_id, quantity, reserved, min_stock, tenant_id)
+         VALUES ($1, $2, 0, $3, $4)
+         ON CONFLICT (product_id) DO UPDATE SET quantity = $2, min_stock = $3`,
+        [product.id, initialStock, minStock, tenantId]
       );
     }
 
