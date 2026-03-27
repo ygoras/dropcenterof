@@ -98,19 +98,25 @@ export async function registerProductRoutes(app: FastifyInstance) {
     const tenantId = request.user.tenantId;
 
     // Map frontend field names to DB columns
-    const salePrice = body.sale_price ?? body.sell_price ?? null;
-    const weight = body.weight ?? body.weight_kg ?? null;
-    const width = body.width ?? body.dimensions?.width ?? null;
-    const height = body.height ?? body.dimensions?.height ?? null;
-    const length = body.length ?? body.dimensions?.length ?? null;
+    const sellPrice = body.sale_price ?? body.sell_price ?? 0;
+    const weightKg = body.weight ?? body.weight_kg ?? null;
+    const dims = body.dimensions ?? (body.width || body.height || body.length
+      ? { length: body.length ?? 0, width: body.width ?? 0, height: body.height ?? 0 }
+      : null);
+    const mlCategoryId = body.ml_category_id ?? null;
+    const attributes = body.attributes ?? {};
+    // Store warranty and ML attributes
+    if (body.warranty_type) attributes._warranty_type = body.warranty_type;
+    if (body.warranty_time) attributes._warranty_time = body.warranty_time;
 
     const product = await queryOne(
-      `INSERT INTO products (name, sku, description, cost_price, sale_price, category_id, images, weight, width, height, length, status, tenant_id, brand, condition, gtin)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+      `INSERT INTO products (name, sku, description, cost_price, sell_price, category, images, weight_kg, dimensions, status, tenant_id, brand, ml_category_id, attributes)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
        RETURNING *`,
-      [body.name, body.sku, body.description ?? null, body.cost_price ?? null, salePrice, body.category_id ?? null,
-       JSON.stringify(body.images ?? []), weight, width, height, length, body.status ?? 'active', tenantId,
-       body.brand ?? null, body.condition ?? 'new', body.gtin ?? null]
+      [body.name, body.sku ?? `SKU-${Date.now()}`, body.description ?? null, body.cost_price ?? 0, sellPrice,
+       body.category_id ?? null, JSON.stringify(body.images ?? []), weightKg,
+       dims ? JSON.stringify(dims) : null, body.status ?? 'active', tenantId,
+       body.brand ?? null, mlCategoryId, JSON.stringify(attributes)]
     );
 
     if (!product) return reply.status(500).send({ error: 'Falha ao criar produto' });
