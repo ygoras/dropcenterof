@@ -81,7 +81,7 @@ const AdminMercadoLivre = () => {
     // Use API route (replaces Edge Function) to bypass tenant-scoped RLS
     let overview: any;
     try {
-      overview = await api.post("/api/admin/ml-overview");
+      overview = await api.get("/api/ml/admin/overview");
     } catch (fnError) {
       console.error("Erro ao carregar dados admin ML:", fnError);
       setLoading(false);

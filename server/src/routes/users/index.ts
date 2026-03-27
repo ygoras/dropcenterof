@@ -131,6 +131,62 @@ export async function registerUserRoutes(app: FastifyInstance) {
     return operators;
   });
 
+  // List all profiles (admin)
+  app.get('/api/profiles', {
+    preHandler: [authMiddleware, requireRole('admin', 'manager')],
+  }, async () => {
+    return queryMany(
+      `SELECT id, email, name, tenant_id, phone, avatar_url, created_at FROM profiles ORDER BY created_at DESC`
+    );
+  });
+
+  // Update profile
+  app.patch('/api/profiles/:profileId', {
+    preHandler: [authMiddleware],
+  }, async (request, reply) => {
+    const { profileId } = request.params as { profileId: string };
+    const { name, phone } = request.body as { name?: string; phone?: string | null };
+    const userId = request.user.sub;
+
+    // Users can only update their own profile (admins can update any)
+    const roles = request.user.roles || [];
+    if (profileId !== userId && !roles.includes('admin')) {
+      return reply.status(403).send({ error: 'Sem permissão' });
+    }
+
+    const sets: string[] = [];
+    const params: unknown[] = [];
+    if (name !== undefined) { params.push(name); sets.push(`name = $${params.length}`); }
+    if (phone !== undefined) { params.push(phone); sets.push(`phone = $${params.length}`); }
+
+    if (sets.length === 0) return reply.send({ success: true });
+
+    params.push(profileId);
+    await query(`UPDATE profiles SET ${sets.join(', ')} WHERE id = $${params.length}`, params);
+    return reply.send({ success: true });
+  });
+
+  // List user roles (admin)
+  app.get('/api/user-roles', {
+    preHandler: [authMiddleware, requireRole('admin', 'manager')],
+  }, async (request) => {
+    const { role } = request.query as { role?: string };
+    const params: unknown[] = [];
+    let where = '';
+    if (role) {
+      params.push(role);
+      where = `WHERE ur.role = $${params.length}`;
+    }
+    return queryMany(
+      `SELECT ur.user_id, ur.role, p.name, p.email, p.tenant_id
+       FROM user_roles ur
+       LEFT JOIN profiles p ON p.id = ur.user_id
+       ${where}
+       ORDER BY p.created_at DESC`,
+      params
+    );
+  });
+
   // Delete user (admin)
   app.delete('/api/users/:userId', {
     preHandler: [authMiddleware, requireRole('admin')],

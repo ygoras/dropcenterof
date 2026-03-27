@@ -24,6 +24,7 @@ import { registerTenantRoutes } from './routes/tenants/index.js';
 import { registerPlanRoutes } from './routes/plans/index.js';
 import { registerSubscriptionRoutes } from './routes/subscriptions/index.js';
 import { registerAuditRoutes } from './routes/audit/index.js';
+import { registerPickingRoutes } from './routes/picking/index.js';
 import { registerSSERoutes } from './routes/notifications/sse.js';
 import { startCronJobs } from './services/cronService.js';
 
@@ -64,6 +65,7 @@ async function start() {
   await registerPlanRoutes(app);
   await registerSubscriptionRoutes(app);
   await registerAuditRoutes(app);
+  await registerPickingRoutes(app);
   await registerSSERoutes(app);
 
   // Test DB connection

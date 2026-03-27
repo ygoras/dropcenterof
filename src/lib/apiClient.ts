@@ -67,9 +67,11 @@ class ApiClient {
     body?: unknown,
     options: { retry?: boolean } = { retry: true }
   ): Promise<T> {
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-    };
+    const headers: Record<string, string> = {};
+
+    if (body !== undefined) {
+      headers['Content-Type'] = 'application/json';
+    }
 
     if (this.tokens?.accessToken) {
       headers['Authorization'] = `Bearer ${this.tokens.accessToken}`;
@@ -78,7 +80,7 @@ class ApiClient {
     const res = await fetch(`${API_BASE}${path}`, {
       method,
       headers,
-      body: body ? JSON.stringify(body) : undefined,
+      body: body !== undefined ? JSON.stringify(body) : undefined,
     });
 
     // Handle 401 - try refresh
