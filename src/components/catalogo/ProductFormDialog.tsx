@@ -168,7 +168,7 @@ export function ProductFormDialog({ open, onOpenChange, categories, product, onS
     setSearchingMlCats(true);
     try {
       const result = await api.get<{ categories: Array<{ id: string; name: string; path?: string }> }>(
-        `/api/ml-categories?action=search&q=${encodeURIComponent(query)}`
+        `/api/ml/categories?action=search&q=${encodeURIComponent(query)}`
       );
       if (result?.categories) {
         setMlCategories(result.categories);
@@ -184,7 +184,7 @@ export function ProductFormDialog({ open, onOpenChange, categories, product, onS
     setLoadingMlAttrs(true);
     try {
       const result = await api.get<{ attributes: MlAttr[] }>(
-        `/api/ml-categories?action=attributes&category_id=${encodeURIComponent(categoryId)}`
+        `/api/ml/categories?action=attributes&category_id=${encodeURIComponent(categoryId)}`
       );
       if (result?.attributes) {
         setMlAttributes(result.attributes);
