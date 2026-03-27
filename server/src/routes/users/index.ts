@@ -33,11 +33,18 @@ export async function registerUserRoutes(app: FastifyInstance) {
     const body = request.body as z.infer<typeof createSellerSchema>;
 
     // Create tenant first
+    const slug = body.company_name
+      .toLowerCase()
+      .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-|-$/g, '')
+      + '-' + Date.now().toString(36);
+
     const tenant = await queryOne<{ id: string }>(
-      `INSERT INTO tenants (name, document, settings)
-       VALUES ($1, $2, '{}')
+      `INSERT INTO tenants (name, slug, document, settings)
+       VALUES ($1, $2, $3, '{}')
        RETURNING id`,
-      [body.company_name, body.company_document ?? null]
+      [body.company_name, slug, body.company_document ?? null]
     );
 
     if (!tenant) {
