@@ -205,8 +205,10 @@ export async function registerUserRoutes(app: FastifyInstance) {
     const sellers = await queryMany(
       `SELECT p.id, p.email, p.name, p.tenant_id, p.avatar_url, p.created_at,
               t.name as store_name, t.document, p.phone,
-              s.status as subscription_status, s.plan_id,
-              pl.name as plan_name
+              t.status as tenant_status,
+              CASE WHEN t.status = 'active' THEN true ELSE false END as is_active,
+              s.status as subscription_status, s.plan_id, s.billing_day,
+              pl.name as plan_name, pl.price as plan_price
        FROM profiles p
        JOIN user_roles ur ON ur.user_id = p.id
        LEFT JOIN tenants t ON t.id = p.tenant_id
