@@ -7,12 +7,14 @@ import { NotificationCenter } from "@/components/NotificationCenter";
 interface TopbarProps {
   portalLabel: string;
   userName?: string;
+  portal?: "platform" | "seller" | "operator";
 }
 
-export function Topbar({ portalLabel, userName }: TopbarProps) {
+export function Topbar({ portalLabel, userName, portal }: TopbarProps) {
   const { user, signOut } = useAuth();
   const { theme, setTheme } = useTheme();
-  const displayName = userName || user?.user_metadata?.name || user?.email?.split("@")[0] || "Usuário";
+  const displayName = userName || user?.full_name?.split(" ")[0] || user?.email?.split("@")[0] || "Usuário";
+  const settingsPath = portal === "seller" ? "/seller/configuracoes" : portal === "operator" ? "/operacao" : "/configuracoes";
 
   const cycleTheme = () => {
     if (theme === "light") setTheme("dark");
@@ -52,7 +54,7 @@ export function Topbar({ portalLabel, userName }: TopbarProps) {
 
         {/* User */}
         <Link
-          to="/configuracoes"
+          to={settingsPath}
           className="flex items-center gap-2 px-2.5 py-1.5 rounded-xl hover:bg-secondary/50 transition-colors"
         >
           <div className="w-8 h-8 rounded-xl gradient-primary flex items-center justify-center shadow-glow">

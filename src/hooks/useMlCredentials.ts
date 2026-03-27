@@ -68,6 +68,8 @@ export function useMlCredentials() {
 
     const appUrl = window.location.origin;
     const data = await api.post<{ auth_url: string }>("/api/ml/oauth", {
+      tenant_id: user.tenant_id,
+      user_id: user.id,
       app_url: appUrl,
     });
 
