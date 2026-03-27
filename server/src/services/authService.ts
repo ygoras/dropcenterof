@@ -136,10 +136,9 @@ export async function register(
     const profile: UserProfile = {
       id: authUser.id,
       email: email.toLowerCase(),
-      name: fullName,
+      full_name: fullName,
       tenant_id: tenantId ?? null,
       roles: ['seller'],
-      subscription_status: null,
     };
 
     const accessToken = generateAccessToken({
@@ -250,10 +249,9 @@ export async function createUserWithRole(
     return {
       id: authUser.id,
       email: email.toLowerCase(),
-      name: fullName,
+      full_name: fullName,
       tenant_id: tenantId ?? null,
       roles: [role],
-      subscription_status: null,
     };
   });
 }
