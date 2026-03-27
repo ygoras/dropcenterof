@@ -1,0 +1,875 @@
+import type { FastifyInstance } from 'fastify';
+import { query, queryOne, queryMany } from '../../lib/db.js';
+import { authMiddleware } from '../../middleware/auth.js';
+import { logger } from '../../lib/logger.js';
+
+const ML_API = 'https://api.mercadolibre.com';
+
+interface MlCredRow {
+  id: string;
+  tenant_id: string;
+  access_token: string;
+  expires_at: string;
+  ml_user_id: string;
+}
+
+export async function registerMlSyncRoutes(app: FastifyInstance) {
+  // ─── ML Sync ───────────────────────────────────────────────────────
+  app.post('/api/ml/sync', async (request, reply) => {
+    const body = request.body as {
+      action?: string; listing_id?: string; product_id?: string;
+      ml_credential_id?: string; listing_type_id?: string;
+      price?: number; category_id?: string;
+    };
+    const { action, listing_id: listingId } = body;
+
+    try {
+      // stock_check does NOT require auth (internal call)
+      if (action === 'stock_check') {
+        return await handleStockCheck(body.product_id, reply);
+      }
+
+      // All other actions require auth
+      if (!request.user) {
+        // Run auth manually since this route has mixed auth requirements
+        await new Promise<void>((resolve, reject) => {
+          authMiddleware(request, reply).then(resolve).catch(reject);
+        });
+        if (reply.sent) return;
+      }
+
+      const tenantId = request.user?.tenantId;
+      if (!tenantId) {
+        return reply.status(400).send({ error: 'Perfil sem tenant' });
+      }
+
+      // Resolve credential
+      const cred = await resolveCredential(listingId, body.ml_credential_id, tenantId, action);
+      if (!cred) {
+        return reply.status(400).send({ error: 'Mercado Livre não conectado' });
+      }
+
+      if (new Date(cred.expires_at) < new Date()) {
+        return reply.status(401).send({ error: 'Token ML expirado. Reconecte sua conta.' });
+      }
+
+      switch (action) {
+        case 'publish':
+          return await handlePublish(cred, tenantId, listingId!, reply);
+        case 'update':
+          return await handleUpdate(cred, listingId!, body.listing_type_id, reply);
+        case 'pause':
+          return await handleStatusChange(cred, listingId!, 'paused', reply);
+        case 'activate':
+          return await handleStatusChange(cred, listingId!, 'active', reply);
+        case 'close':
+          return await handleClose(cred, listingId!, reply);
+        case 'get_fees':
+          return await handleGetFees(cred, body, reply);
+        case 'refresh':
+          return await handleRefresh(cred, listingId!, reply);
+        default:
+          return reply.status(400).send({ error: 'Ação inválida' });
+      }
+    } catch (err) {
+      logger.error({ err }, 'ml-sync error');
+      return reply.status(500).send({ error: 'Erro interno no sync' });
+    }
+  });
+
+  // Apply auth preHandler only for non-stock_check calls
+  app.addHook('onRequest', async (request, reply) => {
+    if (
+      request.routeOptions?.url === '/api/ml/sync' &&
+      request.method === 'POST'
+    ) {
+      // We'll handle auth inside the route handler since stock_check doesn't need it
+      return;
+    }
+  });
+}
+
+// ─── RESOLVE CREDENTIAL ──────────────────────────────────────────────
+async function resolveCredential(
+  listingId: string | undefined,
+  mlCredentialId: string | undefined,
+  tenantId: string,
+  action: string | undefined,
+): Promise<MlCredRow | null> {
+  let cred: MlCredRow | null = null;
+
+  if (listingId && action !== 'get_fees') {
+    const listing = await queryOne<{ ml_credential_id: string | null }>(
+      `SELECT ml_credential_id FROM ml_listings WHERE id = $1 LIMIT 1`,
+      [listingId]
+    );
+    if (listing?.ml_credential_id) {
+      cred = await queryOne<MlCredRow>(
+        `SELECT id, tenant_id, access_token, expires_at, ml_user_id FROM ml_credentials WHERE id = $1 LIMIT 1`,
+        [listing.ml_credential_id]
+      );
+    }
+  }
+
+  if (!cred && mlCredentialId) {
+    cred = await queryOne<MlCredRow>(
+      `SELECT id, tenant_id, access_token, expires_at, ml_user_id FROM ml_credentials WHERE id = $1 AND tenant_id = $2 LIMIT 1`,
+      [mlCredentialId, tenantId]
+    );
+  }
+
+  if (!cred) {
+    cred = await queryOne<MlCredRow>(
+      `SELECT id, tenant_id, access_token, expires_at, ml_user_id FROM ml_credentials WHERE tenant_id = $1 ORDER BY created_at LIMIT 1`,
+      [tenantId]
+    );
+  }
+
+  return cred;
+}
+
+// ─── PUBLISH ─────────────────────────────────────────────────────────
+async function handlePublish(cred: MlCredRow, tenantId: string, listingId: string, reply: any) {
+  const listing = await queryOne<any>(
+    `SELECT l.*,
+       json_build_object(
+         'name', p.name, 'description', p.description, 'sell_price', p.sell_price,
+         'images', p.images, 'brand', p.brand, 'category', p.category,
+         'weight_kg', p.weight_kg, 'dimensions', p.dimensions, 'sku', p.sku,
+         'condition', p.condition, 'gtin', p.gtin, 'warranty_type', p.warranty_type,
+         'warranty_time', p.warranty_time, 'ml_category_id', p.ml_category_id,
+         'attributes', p.attributes
+       ) as products
+     FROM ml_listings l
+     LEFT JOIN products p ON p.id = l.product_id
+     WHERE l.id = $1 AND l.tenant_id = $2
+     LIMIT 1`,
+    [listingId, tenantId]
+  );
+
+  if (!listing) {
+    return reply.status(404).send({ error: 'Anúncio não encontrado' });
+  }
+
+  if (listing.ml_item_id) {
+    return reply.status(400).send({ error: 'Anúncio já publicado no ML', ml_item_id: listing.ml_item_id });
+  }
+
+  const product = listing.products;
+  const listingAttrs = listing.attributes || {};
+
+  const listingTypeId = listingAttrs._listing_type_id || 'gold_pro';
+  const itemCondition = listingAttrs._condition || product?.condition || 'new';
+  const warrantyType = listingAttrs._warranty_type || product?.warranty_type || 'Garantia do vendedor';
+  const warrantyTime = listingAttrs._warranty_time || product?.warranty_time || '90 dias';
+  const sellerSku = listingAttrs._seller_sku || product?.sku;
+  const freeShipping = listingAttrs._free_shipping === true;
+  const productAttrs = product?.attributes as Record<string, unknown> | null;
+  const availableQty = Number(productAttrs?._available_quantity || listingAttrs._available_quantity || 1);
+
+  const conditionMap: Record<string, string> = {
+    new: '2230284',
+    used: '2230581',
+    refurbished: '2230582',
+  };
+
+  const mlPayload: Record<string, unknown> = {
+    title: listing.title,
+    category_id: listing.category_id || product?.ml_category_id || 'MLB1000',
+    price: listing.price,
+    currency_id: 'BRL',
+    available_quantity: Math.max(availableQty, 1),
+    buying_mode: 'buy_it_now',
+    condition: itemCondition === 'refurbished' ? 'new' : itemCondition,
+    listing_type_id: listingTypeId,
+    channels: ['marketplace'],
+    sale_terms: [
+      { id: 'WARRANTY_TYPE', value_name: warrantyType },
+      { id: 'WARRANTY_TIME', value_name: warrantyTime },
+    ],
+    pictures: (product?.images || []).map((url: string) => ({ source: url })),
+  };
+
+  const shippingObj: Record<string, unknown> = {
+    mode: 'me2',
+    local_pick_up: false,
+    free_shipping: freeShipping,
+  };
+
+  if (product?.dimensions && product?.weight_kg) {
+    const dims = product.dimensions as { height?: number; width?: number; length?: number };
+    const h = dims.height || 10;
+    const w = dims.width || 10;
+    const l = dims.length || 10;
+    const weightGrams = Math.round((product.weight_kg || 0.5) * 1000);
+    shippingObj.dimensions = `${h}x${w}x${l},${weightGrams}`;
+  }
+  mlPayload.shipping = shippingObj;
+
+  // Build ML attributes
+  const mlAttributes: Array<Record<string, string>> = [];
+
+  if (conditionMap[itemCondition]) {
+    mlAttributes.push({ id: 'ITEM_CONDITION', value_id: conditionMap[itemCondition] });
+  }
+
+  if (sellerSku) {
+    mlAttributes.push({ id: 'SELLER_SKU', value_name: sellerSku });
+  }
+
+  if (listingAttrs && typeof listingAttrs === 'object') {
+    for (const [id, value] of Object.entries(listingAttrs)) {
+      if (id.startsWith('_')) continue;
+      const alreadyAdded = mlAttributes.some((a) => a.id === id);
+      if (!alreadyAdded && value) {
+        mlAttributes.push({ id, value_name: String(value) });
+      }
+    }
+  }
+
+  if (productAttrs && typeof productAttrs === 'object') {
+    for (const [id, value] of Object.entries(productAttrs)) {
+      if (id.startsWith('_')) continue;
+      const alreadyAdded = mlAttributes.some((a) => a.id === id);
+      if (!alreadyAdded && value) {
+        mlAttributes.push({ id, value_name: String(value) });
+      }
+    }
+  }
+
+  if (mlAttributes.length > 0) {
+    mlPayload.attributes = mlAttributes;
+  }
+
+  logger.debug({ listingId }, 'Publishing to ML');
+
+  const mlResponse = await fetch(`${ML_API}/items`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${cred.access_token}`,
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    },
+    body: JSON.stringify(mlPayload),
+  });
+
+  const mlData: any = await mlResponse.json();
+
+  if (!mlResponse.ok) {
+    logger.error({ listingId, mlError: mlData.message }, 'ML publish error');
+
+    const causes = mlData.cause || [];
+    const missingAttrs = causes
+      .filter((c: any) => c.code === 'item.attributes.missing_required')
+      .map((c: any) => c.message)
+      .join('; ');
+
+    const errorMsg = missingAttrs
+      ? `Atributos obrigatórios faltando: ${missingAttrs}`
+      : mlData.message || 'Erro desconhecido';
+
+    const updatedAttrs = { ...(listing.attributes || {}), _last_error: errorMsg };
+    await query(
+      `UPDATE ml_listings SET sync_status = 'error', attributes = $1, updated_at = NOW() WHERE id = $2`,
+      [JSON.stringify(updatedAttrs), listingId]
+    );
+
+    return reply.status(400).send({
+      error: 'Erro ao publicar no Mercado Livre',
+      ml_error: errorMsg,
+      ml_details: causes,
+    });
+  }
+
+  // Post description
+  const productDescription = product?.description;
+  if (productDescription && mlData.id) {
+    try {
+      const descRes = await fetch(`${ML_API}/items/${mlData.id}/description`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${cred.access_token}`,
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+        },
+        body: JSON.stringify({ plain_text: productDescription }),
+      });
+      if (!descRes.ok) {
+        // Try PUT as fallback
+        await fetch(`${ML_API}/items/${mlData.id}/description`, {
+          method: 'PUT',
+          headers: {
+            Authorization: `Bearer ${cred.access_token}`,
+            'Content-Type': 'application/json',
+            Accept: 'application/json',
+          },
+          body: JSON.stringify({ plain_text: productDescription }),
+        });
+      }
+    } catch (err) {
+      logger.warn({ err, mlItemId: mlData.id }, 'Error sending description to ML');
+    }
+  }
+
+  // Fetch real data from the published item
+  let saleFeeAmount = 0;
+  let shippingCost = 0;
+  let netAmount = listing.price;
+  let realStatus = 'under_review';
+
+  // 1. Fetch item details for real status
+  try {
+    const itemRes = await fetch(`${ML_API}/items/${mlData.id}`, {
+      headers: { Authorization: `Bearer ${cred.access_token}`, Accept: 'application/json' },
+    });
+    if (itemRes.ok) {
+      const itemInfo: any = await itemRes.json();
+      if (itemInfo.status) realStatus = itemInfo.status;
+    }
+  } catch (err) {
+    logger.warn({ err }, 'Could not fetch item status after publish');
+  }
+
+  // 2. Fetch commission using listing_prices
+  try {
+    const categoryId = listing.category_id || product?.ml_category_id || 'MLB1000';
+    const feesUrl = `${ML_API}/sites/MLB/listing_prices?price=${listing.price}&category_id=${categoryId}&listing_type_id=${listingTypeId}&currency_id=BRL&logistic_type=cross_docking&shipping_mode=me2`;
+    const feesRes = await fetch(feesUrl, {
+      headers: { Authorization: `Bearer ${cred.access_token}`, Accept: 'application/json' },
+    });
+    if (feesRes.ok) {
+      const feesData: any = await feesRes.json();
+      if (Array.isArray(feesData)) {
+        const feeEntry = feesData.find((f: any) => f.listing_type_id === listingTypeId) || feesData[0];
+        if (feeEntry) saleFeeAmount = feeEntry.sale_fee_amount || 0;
+      } else if (feesData?.sale_fee_amount) {
+        saleFeeAmount = feesData.sale_fee_amount;
+      }
+    }
+    if (!saleFeeAmount && listing.price > 0) {
+      const pct = listingTypeId === 'gold_pro' ? 0.17 : 0.12;
+      saleFeeAmount = Math.round(listing.price * pct * 100) / 100;
+    }
+  } catch (err) {
+    logger.warn({ err }, 'Could not fetch commission after publish');
+  }
+
+  // 3. Fetch shipping cost
+  try {
+    const shippingRes = await fetch(`${ML_API}/items/${mlData.id}/shipping_options?zip_code=01310100`, {
+      headers: { Authorization: `Bearer ${cred.access_token}`, Accept: 'application/json' },
+    });
+    if (shippingRes.ok) {
+      const shippingData: any = await shippingRes.json();
+      if (shippingData?.options?.length > 0) {
+        const recommended = shippingData.options.find((o: any) => o.recommended) || shippingData.options[0];
+        shippingCost = recommended?.list_cost || recommended?.cost || 0;
+      }
+      if (!shippingCost && shippingData?.coverage?.all_country?.list_cost) {
+        shippingCost = shippingData.coverage.all_country.list_cost;
+      }
+    }
+
+    // Fallback to user-level shipping estimate
+    if (!shippingCost && product?.dimensions && product?.weight_kg) {
+      const dims = product.dimensions as { height?: number; width?: number; length?: number };
+      const h = dims.height || 10;
+      const w = dims.width || 10;
+      const len = dims.length || 10;
+      const weightGrams = Math.round((product.weight_kg || 0.5) * 1000);
+      const dimensionsStr = `${h}x${w}x${len},${weightGrams}`;
+
+      const shippingParams = new URLSearchParams({
+        dimensions: dimensionsStr,
+        item_price: String(listing.price),
+        listing_type_id: listingTypeId,
+        mode: 'me2',
+        condition: itemCondition || 'new',
+        free_shipping: String(freeShipping),
+        verbose: 'true',
+      });
+
+      const fallbackRes = await fetch(
+        `${ML_API}/users/${cred.ml_user_id}/shipping_options/free?${shippingParams.toString()}`,
+        { headers: { Authorization: `Bearer ${cred.access_token}`, Accept: 'application/json' } }
+      );
+      if (fallbackRes.ok) {
+        const fallbackData: any = await fallbackRes.json();
+        shippingCost = fallbackData?.coverage?.all_country?.list_cost || 0;
+        if (!shippingCost && fallbackData?.options?.length > 0) {
+          const maxOpt = fallbackData.options.reduce(
+            (m: any, o: any) => ((o.list_cost || 0) > (m.list_cost || 0) ? o : m),
+            fallbackData.options[0],
+          );
+          shippingCost = maxOpt?.list_cost || maxOpt?.cost || 0;
+        }
+      }
+    }
+  } catch (err) {
+    logger.warn({ err }, 'Could not fetch shipping cost after publish');
+  }
+
+  netAmount = listing.price - saleFeeAmount - shippingCost;
+
+  const updatedAttrs = {
+    ...(listing.attributes || {}),
+    _ml_sale_fee: saleFeeAmount,
+    _ml_shipping_cost: shippingCost,
+    _ml_net_amount: netAmount,
+  };
+
+  await query(
+    `UPDATE ml_listings
+     SET ml_item_id = $1, ml_credential_id = $2, status = $3, sync_status = 'synced',
+         last_sync_at = NOW(), updated_at = NOW(), attributes = $4
+     WHERE id = $5`,
+    [mlData.id, cred.id, realStatus, JSON.stringify(updatedAttrs), listingId]
+  );
+
+  return reply.send({
+    success: true,
+    ml_item_id: mlData.id,
+    permalink: mlData.permalink,
+    status: realStatus,
+    sale_fee: saleFeeAmount,
+    shipping_cost: shippingCost,
+    net_amount: netAmount,
+  });
+}
+
+// ─── UPDATE ──────────────────────────────────────────────────────────
+async function handleUpdate(cred: MlCredRow, listingId: string, newListingTypeId: string | undefined, reply: any) {
+  const listing = await queryOne<any>(
+    `SELECT * FROM ml_listings WHERE id = $1 LIMIT 1`,
+    [listingId]
+  );
+
+  if (!listing || !listing.ml_item_id) {
+    return reply.status(400).send({ error: 'Anúncio não publicado no ML' });
+  }
+
+  const stockData = await queryOne<{ available: number }>(
+    `SELECT available FROM available_stock WHERE product_id = $1 AND tenant_id = $2 LIMIT 1`,
+    [listing.product_id, listing.tenant_id]
+  );
+
+  const updatePayload: Record<string, unknown> = {
+    price: listing.price,
+    available_quantity: stockData ? Math.max(stockData.available, 0) : 0,
+  };
+
+  const mlResponse = await fetch(`${ML_API}/items/${listing.ml_item_id}`, {
+    method: 'PUT',
+    headers: {
+      Authorization: `Bearer ${cred.access_token}`,
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    },
+    body: JSON.stringify(updatePayload),
+  });
+
+  const mlData: any = await mlResponse.json();
+
+  if (!mlResponse.ok) {
+    logger.error({ listingId, mlError: mlData.message }, 'ML update error');
+    await query(
+      `UPDATE ml_listings SET sync_status = 'error', updated_at = NOW() WHERE id = $1`,
+      [listingId]
+    );
+    return reply.status(400).send({ error: 'Erro ao atualizar no ML', ml_error: mlData.message });
+  }
+
+  // Fetch updated fees
+  const listingTypeId = newListingTypeId || (listing.attributes as any)?._listing_type_id || 'gold_pro';
+  let saleFeeAmount = 0;
+  let shippingCost = 0;
+  let netAmount = listing.price;
+
+  try {
+    const categoryId = listing.category_id || 'MLB1000';
+    const feesUrl = `${ML_API}/sites/MLB/listing_prices?price=${listing.price}&category_id=${categoryId}&listing_type_id=${listingTypeId}&currency_id=BRL&logistic_type=cross_docking&shipping_mode=me2`;
+    const feesRes = await fetch(feesUrl, {
+      headers: { Authorization: `Bearer ${cred.access_token}`, Accept: 'application/json' },
+    });
+    if (feesRes.ok) {
+      const feesData: any = await feesRes.json();
+      if (Array.isArray(feesData)) {
+        const feeEntry = feesData.find((f: any) => f.listing_type_id === listingTypeId) || feesData[0];
+        if (feeEntry) saleFeeAmount = feeEntry.sale_fee_amount || 0;
+      } else if (feesData?.sale_fee_amount) {
+        saleFeeAmount = feesData.sale_fee_amount;
+      }
+    }
+    if (!saleFeeAmount && listing.price > 0) {
+      const pct = listingTypeId === 'gold_pro' ? 0.17 : 0.12;
+      saleFeeAmount = Math.round(listing.price * pct * 100) / 100;
+    }
+  } catch (err) {
+    logger.warn({ err }, 'Could not fetch listing fees on update');
+  }
+
+  // Fetch shipping cost
+  try {
+    const product = await queryOne<{ dimensions: any; weight_kg: number }>(
+      `SELECT dimensions, weight_kg FROM products WHERE id = $1 LIMIT 1`,
+      [listing.product_id]
+    );
+
+    if (product) {
+      const dims = product.dimensions as { height?: number; width?: number; length?: number } | null;
+      const h = dims?.height || 10;
+      const w = dims?.width || 10;
+      const l = dims?.length || 10;
+      const weightGrams = Math.round((product.weight_kg || 0.5) * 1000);
+      const dimensionsStr = `${h}x${w}x${l},${weightGrams}`;
+      const freeShippingFlag = (listing.attributes as any)?._free_shipping === true;
+
+      const shippingParams = new URLSearchParams({
+        dimensions: dimensionsStr,
+        item_price: String(listing.price),
+        listing_type_id: listingTypeId,
+        mode: 'me2',
+        condition: (listing.attributes as any)?._condition || 'new',
+        free_shipping: String(freeShippingFlag),
+        verbose: 'true',
+      });
+
+      const shippingUrl = `${ML_API}/users/${cred.ml_user_id}/shipping_options/free?${shippingParams.toString()}`;
+      const shippingRes = await fetch(shippingUrl, {
+        headers: { Authorization: `Bearer ${cred.access_token}`, Accept: 'application/json' },
+      });
+      if (shippingRes.ok) {
+        const shippingData: any = await shippingRes.json();
+        shippingCost = shippingData?.coverage?.all_country?.list_cost || 0;
+        if (!shippingCost && shippingData?.options?.length > 0) {
+          const maxOpt = shippingData.options.reduce(
+            (m: any, o: any) => ((o.list_cost || 0) > (m.list_cost || 0) ? o : m),
+            shippingData.options[0],
+          );
+          shippingCost = maxOpt?.list_cost || maxOpt?.cost || 0;
+        }
+      }
+    }
+  } catch (err) {
+    logger.warn({ err }, 'Could not fetch shipping cost on update');
+  }
+
+  netAmount = listing.price - saleFeeAmount - shippingCost;
+
+  const updatedAttrs: Record<string, unknown> = {
+    ...(listing.attributes || {}),
+    _ml_sale_fee: saleFeeAmount,
+    _ml_shipping_cost: shippingCost,
+    _ml_net_amount: netAmount,
+  };
+  if (newListingTypeId) {
+    updatedAttrs._listing_type_id = newListingTypeId;
+  }
+
+  await query(
+    `UPDATE ml_listings SET sync_status = 'synced', last_sync_at = NOW(), updated_at = NOW(), attributes = $1 WHERE id = $2`,
+    [JSON.stringify(updatedAttrs), listingId]
+  );
+
+  return reply.send({
+    success: true,
+    sale_fee: saleFeeAmount,
+    shipping_cost: shippingCost,
+    net_amount: netAmount,
+  });
+}
+
+// ─── STATUS CHANGE (PAUSE / ACTIVATE) ───────────────────────────────
+async function handleStatusChange(cred: MlCredRow, listingId: string, newStatus: string, reply: any) {
+  const listing = await queryOne<{ ml_item_id: string | null }>(
+    `SELECT ml_item_id FROM ml_listings WHERE id = $1 LIMIT 1`,
+    [listingId]
+  );
+
+  if (!listing || !listing.ml_item_id) {
+    return reply.status(400).send({ error: 'Anúncio não publicado no ML' });
+  }
+
+  const mlResponse = await fetch(`${ML_API}/items/${listing.ml_item_id}`, {
+    method: 'PUT',
+    headers: {
+      Authorization: `Bearer ${cred.access_token}`,
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    },
+    body: JSON.stringify({ status: newStatus }),
+  });
+
+  const mlData: any = await mlResponse.json();
+
+  if (!mlResponse.ok) {
+    logger.error({ listingId, mlError: mlData.message }, 'ML status change error');
+    return reply.status(400).send({ error: 'Erro ao alterar status no ML', ml_error: mlData.message });
+  }
+
+  await query(
+    `UPDATE ml_listings SET status = $1, sync_status = 'synced', last_sync_at = NOW(), updated_at = NOW() WHERE id = $2`,
+    [newStatus, listingId]
+  );
+
+  return reply.send({ success: true, status: newStatus });
+}
+
+// ─── CLOSE ───────────────────────────────────────────────────────────
+async function handleClose(cred: MlCredRow, listingId: string, reply: any) {
+  const listing = await queryOne<{ ml_item_id: string | null }>(
+    `SELECT ml_item_id FROM ml_listings WHERE id = $1 LIMIT 1`,
+    [listingId]
+  );
+
+  if (!listing) {
+    return reply.status(404).send({ error: 'Anúncio não encontrado' });
+  }
+
+  if (listing.ml_item_id) {
+    const mlResponse = await fetch(`${ML_API}/items/${listing.ml_item_id}`, {
+      method: 'PUT',
+      headers: {
+        Authorization: `Bearer ${cred.access_token}`,
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      },
+      body: JSON.stringify({ status: 'closed' }),
+    });
+
+    const mlData: any = await mlResponse.json();
+
+    if (!mlResponse.ok) {
+      logger.error({ listingId, mlError: mlData.message }, 'ML close error');
+      return reply.status(400).send({ error: 'Erro ao encerrar no ML', ml_error: mlData.message });
+    }
+  }
+
+  await query(`DELETE FROM ml_listings WHERE id = $1`, [listingId]);
+
+  return reply.send({ success: true });
+}
+
+// ─── GET FEES ────────────────────────────────────────────────────────
+async function handleGetFees(cred: MlCredRow, body: any, reply: any) {
+  const { price, category_id, listing_type_id } = body;
+  const ltId = listing_type_id || 'gold_pro';
+
+  const feesUrl = `${ML_API}/sites/MLB/listing_prices?price=${price}&category_id=${category_id || 'MLB1000'}&listing_type_id=${ltId}&currency_id=BRL&logistic_type=cross_docking&shipping_mode=me2`;
+
+  const feesRes = await fetch(feesUrl, {
+    headers: { Authorization: `Bearer ${cred.access_token}`, Accept: 'application/json' },
+  });
+
+  if (!feesRes.ok) {
+    const errData: any = await feesRes.json();
+    return reply.status(400).send({ error: 'Erro ao consultar taxas', ml_error: errData.message });
+  }
+
+  const feesData: any = await feesRes.json();
+
+  let saleFeeAmount = 0;
+  let feeDetails = null;
+
+  if (Array.isArray(feesData)) {
+    const feeEntry = feesData.find((f: any) => f.listing_type_id === ltId) || feesData[0];
+    if (feeEntry) {
+      saleFeeAmount = feeEntry.sale_fee_amount || 0;
+      feeDetails = feeEntry.sale_fee_details || null;
+    }
+  } else if (feesData?.sale_fee_amount) {
+    saleFeeAmount = feesData.sale_fee_amount;
+    feeDetails = feesData.sale_fee_details || null;
+  }
+
+  // Fallback
+  if (!saleFeeAmount && price > 0) {
+    const pct = ltId === 'gold_pro' ? 0.17 : 0.12;
+    saleFeeAmount = Math.round(price * pct * 100) / 100;
+  }
+
+  return reply.send({ sale_fee_amount: saleFeeAmount, fee_details: feeDetails, fees: feesData });
+}
+
+// ─── REFRESH (Sync real data from ML) ────────────────────────────────
+async function handleRefresh(cred: MlCredRow, listingId: string, reply: any) {
+  const listing = await queryOne<any>(
+    `SELECT * FROM ml_listings WHERE id = $1 LIMIT 1`,
+    [listingId]
+  );
+
+  if (!listing || !listing.ml_item_id) {
+    return reply.status(400).send({ error: 'Anúncio não publicado no ML' });
+  }
+
+  // 1. Fetch item details (status, shipping info)
+  const itemRes = await fetch(`${ML_API}/items/${listing.ml_item_id}`, {
+    headers: { Authorization: `Bearer ${cred.access_token}`, Accept: 'application/json' },
+  });
+  if (!itemRes.ok) {
+    const errData: any = await itemRes.json();
+    return reply.status(400).send({ error: 'Erro ao consultar item no ML', ml_error: errData.message });
+  }
+  const itemData: any = await itemRes.json();
+  const realStatus = itemData.status || listing.status;
+
+  // 2. Fetch commission using listing_prices
+  const ltId = itemData.listing_type_id || (listing.attributes as any)?._listing_type_id || 'gold_pro';
+  let saleFeeAmount = 0;
+  try {
+    const categoryId = listing.category_id || 'MLB1000';
+    const feesUrl = `${ML_API}/sites/MLB/listing_prices?price=${listing.price}&category_id=${categoryId}&listing_type_id=${ltId}&currency_id=BRL&logistic_type=cross_docking&shipping_mode=me2`;
+    const feesRes = await fetch(feesUrl, {
+      headers: { Authorization: `Bearer ${cred.access_token}`, Accept: 'application/json' },
+    });
+    if (feesRes.ok) {
+      const feesData: any = await feesRes.json();
+      if (Array.isArray(feesData)) {
+        const feeEntry = feesData.find((f: any) => f.listing_type_id === ltId) || feesData[0];
+        if (feeEntry) saleFeeAmount = feeEntry.sale_fee_amount || 0;
+      } else if (feesData?.sale_fee_amount) {
+        saleFeeAmount = feesData.sale_fee_amount;
+      }
+    }
+    if (!saleFeeAmount && listing.price > 0) {
+      const pct = ltId === 'gold_pro' ? 0.17 : 0.12;
+      saleFeeAmount = Math.round(listing.price * pct * 100) / 100;
+    }
+  } catch (err) {
+    logger.warn({ err }, 'Refresh: could not fetch fees');
+  }
+
+  // 3. Get shipping cost from item shipping options
+  let shippingCost = 0;
+  try {
+    const shippingRes = await fetch(`${ML_API}/items/${listing.ml_item_id}/shipping_options?zip_code=01310100`, {
+      headers: { Authorization: `Bearer ${cred.access_token}`, Accept: 'application/json' },
+    });
+    if (shippingRes.ok) {
+      const shippingData: any = await shippingRes.json();
+      if (shippingData?.options?.length > 0) {
+        const recommended = shippingData.options.find((o: any) => o.recommended) || shippingData.options[0];
+        shippingCost = recommended?.list_cost || recommended?.cost || 0;
+      }
+      if (!shippingCost && shippingData?.coverage?.all_country?.list_cost) {
+        shippingCost = shippingData.coverage.all_country.list_cost;
+      }
+    }
+  } catch (err) {
+    logger.warn({ err }, 'Refresh: could not fetch shipping');
+  }
+
+  const netAmount = listing.price - saleFeeAmount - shippingCost;
+
+  const updatedAttrs = {
+    ...(listing.attributes || {}),
+    _ml_sale_fee: saleFeeAmount,
+    _ml_shipping_cost: shippingCost,
+    _ml_net_amount: netAmount,
+    _listing_type_id: itemData.listing_type_id || (listing.attributes as any)?._listing_type_id,
+  };
+
+  await query(
+    `UPDATE ml_listings SET status = $1, sync_status = 'synced', last_sync_at = NOW(), updated_at = NOW(), attributes = $2 WHERE id = $3`,
+    [realStatus, JSON.stringify(updatedAttrs), listingId]
+  );
+
+  return reply.send({
+    success: true,
+    status: realStatus,
+    sale_fee: saleFeeAmount,
+    shipping_cost: shippingCost,
+    net_amount: netAmount,
+    listing_type_id: itemData.listing_type_id,
+  });
+}
+
+// ─── STOCK CHECK ─────────────────────────────────────────────────────
+async function handleStockCheck(productId: string | undefined, reply: any) {
+  if (!productId) {
+    return reply.status(400).send({ error: 'product_id é obrigatório' });
+  }
+
+  const listings = await queryMany<{
+    id: string; ml_item_id: string | null; product_id: string;
+    tenant_id: string; status: string; attributes: Record<string, unknown> | null;
+    ml_credential_id: string | null;
+  }>(
+    `SELECT id, ml_item_id, product_id, tenant_id, status, attributes, ml_credential_id
+     FROM ml_listings
+     WHERE product_id = $1 AND status IN ('active', 'paused')`,
+    [productId]
+  );
+
+  if (!listings || listings.length === 0) {
+    return reply.send({ message: 'Sem anúncios ativos para este produto' });
+  }
+
+  const results: Array<{ id: string; action: string; reason?: string; error?: string }> = [];
+
+  for (const listing of listings) {
+    const stockData = await queryOne<{ available: number }>(
+      `SELECT available FROM available_stock WHERE product_id = $1 AND tenant_id = $2 LIMIT 1`,
+      [listing.product_id, listing.tenant_id]
+    );
+
+    const available = stockData?.available || 0;
+    const minStock = Number((listing.attributes as any)?._min_stock || 0);
+
+    if (available <= minStock && listing.status === 'active' && listing.ml_item_id) {
+      const cred = await getCredForListing(listing.ml_credential_id, listing.tenant_id);
+      if (cred) {
+        try {
+          await fetch(`${ML_API}/items/${listing.ml_item_id}`, {
+            method: 'PUT',
+            headers: { Authorization: `Bearer ${cred.access_token}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status: 'paused' }),
+          });
+          await query(
+            `UPDATE ml_listings SET status = 'paused', updated_at = NOW() WHERE id = $1`,
+            [listing.id]
+          );
+          results.push({ id: listing.id, action: 'paused', reason: 'stock_low' });
+        } catch (err: any) {
+          results.push({ id: listing.id, action: 'error', error: err.message });
+        }
+      }
+    } else if (available > minStock && listing.status === 'paused' && listing.ml_item_id) {
+      const cred = await getCredForListing(listing.ml_credential_id, listing.tenant_id);
+      if (cred) {
+        try {
+          await fetch(`${ML_API}/items/${listing.ml_item_id}`, {
+            method: 'PUT',
+            headers: { Authorization: `Bearer ${cred.access_token}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status: 'active' }),
+          });
+          await query(
+            `UPDATE ml_listings SET status = 'active', updated_at = NOW() WHERE id = $1`,
+            [listing.id]
+          );
+          results.push({ id: listing.id, action: 'activated', reason: 'stock_available' });
+        } catch (err: any) {
+          results.push({ id: listing.id, action: 'error', error: err.message });
+        }
+      }
+    } else {
+      results.push({ id: listing.id, action: 'no_change' });
+    }
+  }
+
+  return reply.send({ results });
+}
+
+async function getCredForListing(mlCredentialId: string | null, tenantId: string) {
+  if (mlCredentialId) {
+    const cred = await queryOne<{ access_token: string }>(
+      `SELECT access_token FROM ml_credentials WHERE id = $1 LIMIT 1`,
+      [mlCredentialId]
+    );
+    if (cred) return cred;
+  }
+  return queryOne<{ access_token: string }>(
+    `SELECT access_token FROM ml_credentials WHERE tenant_id = $1 ORDER BY created_at LIMIT 1`,
+    [tenantId]
+  );
+}

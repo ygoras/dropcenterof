@@ -1,0 +1,38 @@
+[functions.create-seller-user]
+verify_jwt = false
+
+[functions.create-operator]
+verify_jwt = false
+
+[functions.ml-oauth]
+verify_jwt = false
+
+[functions.ml-webhook]
+verify_jwt = false
+
+[functions.ml-refresh-token]
+verify_jwt = false
+
+[functions.ml-sync]
+verify_jwt = false
+
+[functions.ml-categories]
+verify_jwt = false
+
+[functions.ml-disconnect]
+verify_jwt = false
+
+[functions.ml-shipping-cost]
+verify_jwt = false
+
+[functions.ml-price-update]
+verify_jwt = false
+
+[functions.asaas-pix]
+verify_jwt = false
+
+[functions.asaas-webhook]
+verify_jwt = false
+
+[functions.admin-ml-overview]
+verify_jwt = false
