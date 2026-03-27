@@ -132,8 +132,15 @@ export async function register(
       [authUser.id, 'seller']
     );
 
-    const profile = await getUserProfile(authUser.id);
-    if (!profile) throw new Error('Failed to create user profile');
+    // Build profile inline (transaction not yet committed, pool queries can't see the data)
+    const profile: UserProfile = {
+      id: authUser.id,
+      email: email.toLowerCase(),
+      name: fullName,
+      tenant_id: tenantId ?? null,
+      roles: ['seller'],
+      subscription_status: null,
+    };
 
     const accessToken = generateAccessToken({
       sub: profile.id,
@@ -143,7 +150,13 @@ export async function register(
     });
 
     const refreshToken = generateRefreshToken();
-    await storeRefreshToken(authUser.id, refreshToken);
+    const tokenHash = sha256(refreshToken);
+    const expiresAt = new Date();
+    expiresAt.setDate(expiresAt.getDate() + 30);
+    await client.query(
+      `INSERT INTO auth_refresh_tokens (user_id, token_hash, expires_at, device_info) VALUES ($1, $2, $3, '{}')`,
+      [authUser.id, tokenHash, expiresAt]
+    );
 
     return { accessToken, refreshToken, user: profile };
   });
@@ -233,8 +246,14 @@ export async function createUserWithRole(
       [authUser.id, role]
     );
 
-    const profile = await getUserProfile(authUser.id);
-    if (!profile) throw new Error('Failed to create user profile');
-    return profile;
+    // Build profile from transaction client (data not yet committed, so pool queries can't see it)
+    return {
+      id: authUser.id,
+      email: email.toLowerCase(),
+      name: fullName,
+      tenant_id: tenantId ?? null,
+      roles: [role],
+      subscription_status: null,
+    };
   });
 }
