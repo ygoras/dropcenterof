@@ -16,39 +16,63 @@ const createPlanSchema = z.object({
 });
 
 export async function registerPlanRoutes(app: FastifyInstance) {
+  // Public plans (for sellers)
   app.get('/api/plans', {
     preHandler: [authMiddleware],
+  }, async () => {
+    return queryMany(`SELECT * FROM plans WHERE is_active = true ORDER BY price ASC`);
+  });
+
+  // Admin plans (includes inactive)
+  app.get('/api/admin/plans', {
+    preHandler: [authMiddleware, requireRole('admin', 'manager')],
   }, async () => {
     return queryMany(`SELECT * FROM plans ORDER BY price ASC`);
   });
 
-  app.post('/api/plans', {
-    preHandler: [authMiddleware, requireRole('admin'), validateBody(createPlanSchema)],
+  // Create plan (admin) — frontend sends slug, max_stores, features[], is_active
+  app.post('/api/admin/plans', {
+    preHandler: [authMiddleware, requireRole('admin')],
   }, async (request, reply) => {
-    const body = request.body as z.infer<typeof createPlanSchema>;
+    const body = request.body as {
+      name: string; slug?: string; price: number; description?: string | null;
+      max_listings?: number | null; max_stores?: number | null; max_products?: number | null;
+      features?: unknown[]; is_active?: boolean;
+    };
+
+    if (!body.name || body.price === undefined) {
+      return reply.status(400).send({ error: 'name e price são obrigatórios' });
+    }
+
+    const slug = body.slug || body.name.toLowerCase()
+      .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 
     const plan = await queryOne(
-      `INSERT INTO plans (name, description, price, max_listings, max_orders, features, is_default)
-       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
-      [body.name, body.description, body.price, body.max_listings, body.max_orders,
-       JSON.stringify(body.features ?? {}), body.is_default]
+      `INSERT INTO plans (name, slug, price, description, max_listings, max_stores, max_products, features, is_active)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
+      [body.name, slug, body.price, body.description ?? null,
+       body.max_listings ?? null, body.max_stores ?? 1, body.max_products ?? null,
+       JSON.stringify(body.features ?? []), body.is_active !== false]
     );
 
     return reply.status(201).send(plan);
   });
 
-  app.patch('/api/plans/:planId', {
-    preHandler: [authMiddleware, requireRole('admin'), validateBody(createPlanSchema.partial())],
+  // Update plan (admin)
+  app.patch('/api/admin/plans/:planId', {
+    preHandler: [authMiddleware, requireRole('admin')],
   }, async (request, reply) => {
     const { planId } = request.params as { planId: string };
-    const body = request.body as Partial<z.infer<typeof createPlanSchema>>;
+    const body = request.body as Record<string, unknown>;
 
+    const allowedFields = ['name', 'price', 'description', 'max_listings', 'max_stores', 'max_products', 'features', 'is_active'];
     const setClauses: string[] = [];
     const params: unknown[] = [];
     let idx = 1;
 
     for (const [key, value] of Object.entries(body)) {
-      if (value !== undefined) {
+      if (value !== undefined && allowedFields.includes(key)) {
         setClauses.push(`${key} = $${idx}`);
         params.push(key === 'features' ? JSON.stringify(value) : value);
         idx++;
@@ -67,7 +91,8 @@ export async function registerPlanRoutes(app: FastifyInstance) {
     return plan;
   });
 
-  app.delete('/api/plans/:planId', {
+  // Delete plan (admin)
+  app.delete('/api/admin/plans/:planId', {
     preHandler: [authMiddleware, requireRole('admin')],
   }, async (request, reply) => {
     const { planId } = request.params as { planId: string };
