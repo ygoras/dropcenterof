@@ -75,7 +75,7 @@ function parseAndVerifyState(state: string): { tenantId: string; userId: string 
 }
 
 export async function registerMlOAuthRoutes(app: FastifyInstance) {
-  const redirectUri = env.APP_URL + '/api/ml/oauth/callback';
+  const redirectUri = env.APP_URL + '/api/ml/callback';
 
   // ─── Start OAuth flow (authenticated) ───────────────────────────────
   app.post('/api/ml/oauth', {
@@ -103,7 +103,7 @@ export async function registerMlOAuthRoutes(app: FastifyInstance) {
   });
 
   // ─── OAuth callback from ML (no auth) ──────────────────────────────
-  app.get('/api/ml/oauth/callback', async (request, reply) => {
+  app.get('/api/ml/callback', async (request, reply) => {
     const { code, state } = request.query as { code?: string; state?: string };
 
     if (!code || !state) {

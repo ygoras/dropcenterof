@@ -16,7 +16,7 @@ interface MlCredential {
 
 export async function registerMlWebhookRoutes(app: FastifyInstance) {
   // ─── ML Webhook (no auth - external webhook) ───────────────────────
-  app.post('/api/ml/webhook', async (request, reply) => {
+  app.post('/api/webhooks/ml', async (request, reply) => {
     // Optional HMAC signature verification
     if (env.ML_WEBHOOK_SECRET) {
       const signature = request.headers['x-signature'] as string | undefined;
