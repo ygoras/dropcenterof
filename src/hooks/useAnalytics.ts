@@ -125,7 +125,8 @@ export function useAnalytics(overrideFilters?: Partial<AnalyticsFilters>) {
   }, [roleLoading]);
 
   const fetchData = useCallback(async () => {
-    if (!profile?.tenant_id || roleLoading) return;
+    if (roleLoading) return;
+    if (!isAdmin && !isManager && !profile?.tenant_id) return;
     setLoading(true);
 
     try {
@@ -141,7 +142,7 @@ export function useAnalytics(overrideFilters?: Partial<AnalyticsFilters>) {
     } finally {
       setLoading(false);
     }
-  }, [profile?.tenant_id, filters, roleLoading]);
+  }, [profile?.tenant_id, filters, roleLoading, isAdmin, isManager]);
 
   useEffect(() => {
     fetchData();
