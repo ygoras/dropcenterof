@@ -14,7 +14,7 @@ const updateTenantSchema = z.object({
 
 export async function registerTenantRoutes(app: FastifyInstance) {
   app.get('/api/tenants', {
-    preHandler: [authMiddleware, requireRole('admin', 'manager')],
+    preHandler: [authMiddleware, requireRole('admin', 'manager', 'operator')],
   }, async () => {
     return queryMany(
       `SELECT t.*,
