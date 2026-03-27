@@ -34,10 +34,10 @@ export async function registerUserRoutes(app: FastifyInstance) {
 
     // Create tenant first
     const tenant = await queryOne<{ id: string }>(
-      `INSERT INTO tenants (name, document, phone, settings)
-       VALUES ($1, $2, $3, '{}')
+      `INSERT INTO tenants (name, document, settings)
+       VALUES ($1, $2, '{}')
        RETURNING id`,
-      [body.company_name, body.company_document ?? null, body.phone ?? null]
+      [body.company_name, body.company_document ?? null]
     );
 
     if (!tenant) {
@@ -50,7 +50,8 @@ export async function registerUserRoutes(app: FastifyInstance) {
         body.password,
         body.name,
         'seller',
-        tenant.id
+        tenant.id,
+        body.phone
       );
 
       // Create subscription with provided plan or default

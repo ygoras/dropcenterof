@@ -212,7 +212,8 @@ export async function createUserWithRole(
   password: string,
   fullName: string,
   role: string,
-  tenantId?: string
+  tenantId?: string,
+  phone?: string | null
 ): Promise<UserProfile> {
   const passwordHash = await hashPassword(password);
 
@@ -223,8 +224,8 @@ export async function createUserWithRole(
     );
 
     await client.query(
-      `INSERT INTO profiles (id, email, name, tenant_id) VALUES ($1, $2, $3, $4)`,
-      [authUser.id, email.toLowerCase(), fullName, tenantId ?? null]
+      `INSERT INTO profiles (id, email, name, tenant_id, phone) VALUES ($1, $2, $3, $4, $5)`,
+      [authUser.id, email.toLowerCase(), fullName, tenantId ?? null, phone ?? null]
     );
 
     await client.query(
