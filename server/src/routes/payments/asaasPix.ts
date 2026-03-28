@@ -124,7 +124,7 @@ export async function registerAsaasPixRoutes(app: FastifyInstance) {
 
       if (!chargeRes.ok) {
         const errText = await chargeRes.text();
-        logger.error({ tenantId: user.tenantId }, 'Asaas charge creation failed');
+        logger.error({ tenantId: user.tenantId, status: chargeRes.status, asaasError: errText, asaasCustomerId }, 'Asaas charge creation failed');
         return reply.status(400).send({ error: 'Erro ao criar cobrança PIX', details: errText });
       }
 
