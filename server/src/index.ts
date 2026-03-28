@@ -99,11 +99,17 @@ async function start() {
 
   // Asaas sends webhooks to /api/webhooks/asaas — proxy to internal handler with headers
   app.post('/api/webhooks/asaas', async (request, reply) => {
+    const asaasToken = request.headers['asaas-access-token'] as string | undefined;
+    logger.info({ hasAsaasToken: !!asaasToken, allHeaders: Object.keys(request.headers) }, 'Webhook proxy: incoming headers');
+
     const res = await app.inject({
       method: 'POST',
       url: '/api/payments/webhook',
       payload: request.body as object,
-      headers: request.headers as Record<string, string>,
+      headers: {
+        'content-type': 'application/json',
+        ...(asaasToken ? { 'asaas-access-token': asaasToken } : {}),
+      },
     });
     reply.status(res.statusCode).send(JSON.parse(res.payload));
   });

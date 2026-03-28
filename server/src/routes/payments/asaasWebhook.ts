@@ -16,8 +16,16 @@ interface AsaasWebhookBody {
 
 export async function registerAsaasWebhookRoutes(app: FastifyInstance) {
   app.post('/api/payments/webhook', async (request: FastifyRequest<{ Body: AsaasWebhookBody }>, reply: FastifyReply) => {
-    // Mandatory webhook token validation
+    // Webhook token validation
     const incomingToken = request.headers['asaas-access-token'] as string | undefined;
+    logger.info({
+      hasToken: !!incomingToken,
+      tokenPreview: incomingToken ? incomingToken.substring(0, 8) + '...' : 'none',
+      expectedPreview: env.ASAAS_WEBHOOK_TOKEN ? env.ASAAS_WEBHOOK_TOKEN.substring(0, 8) + '...' : 'none',
+      match: incomingToken === env.ASAAS_WEBHOOK_TOKEN,
+      headers: Object.keys(request.headers).filter(h => h.includes('asaas') || h.includes('token') || h.includes('access')),
+    }, 'Asaas webhook auth debug');
+
     if (!incomingToken || incomingToken !== env.ASAAS_WEBHOOK_TOKEN) {
       logger.warn('Invalid or missing Asaas webhook token');
       return reply.status(401).send({ error: 'Unauthorized' });
