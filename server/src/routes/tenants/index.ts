@@ -4,6 +4,7 @@ import { authMiddleware } from '../../middleware/auth.js';
 import { requireRole } from '../../middleware/rbac.js';
 import { validateBody } from '../../middleware/validateBody.js';
 import { queryMany, queryOne, query } from '../../lib/db.js';
+import { encrypt, decrypt } from '../../lib/crypto.js';
 
 const updateTenantSchema = z.object({
   name: z.string().min(1).optional(),
@@ -11,6 +12,14 @@ const updateTenantSchema = z.object({
   phone: z.string().optional(),
   settings: z.record(z.unknown()).optional(),
 });
+
+function decryptTenantDocument(tenant: any): any {
+  if (!tenant) return tenant;
+  if (tenant.document && typeof tenant.document === 'string') {
+    try { tenant.document = decrypt(tenant.document); } catch { /* not encrypted or invalid */ }
+  }
+  return tenant;
+}
 
 export async function registerTenantRoutes(app: FastifyInstance) {
   app.get('/api/tenants', {
@@ -39,7 +48,7 @@ export async function registerTenantRoutes(app: FastifyInstance) {
 
     const tenant = await queryOne(`SELECT * FROM tenants WHERE id = $1`, [tenantId]);
     if (!tenant) return reply.status(404).send({ error: 'Tenant não encontrado' });
-    return tenant;
+    return decryptTenantDocument(tenant);
   });
 
   app.patch('/api/tenants/:tenantId', {
@@ -60,7 +69,13 @@ export async function registerTenantRoutes(app: FastifyInstance) {
     for (const [key, value] of Object.entries(body)) {
       if (value !== undefined) {
         setClauses.push(`${key} = $${idx}`);
-        params.push(key === 'settings' ? JSON.stringify(value) : value);
+        if (key === 'settings') {
+          params.push(JSON.stringify(value));
+        } else if (key === 'document' && typeof value === 'string' && value.trim()) {
+          params.push(encrypt(value.replace(/\D/g, '')));
+        } else {
+          params.push(value);
+        }
         idx++;
       }
     }

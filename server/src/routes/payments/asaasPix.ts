@@ -3,7 +3,7 @@ import { env } from '../../config/env.js';
 import { query, queryOne, queryMany } from '../../lib/db.js';
 import { authMiddleware } from '../../middleware/auth.js';
 import { requireRole } from '../../middleware/rbac.js';
-import { encrypt } from '../../lib/crypto.js';
+import { encrypt, decrypt } from '../../lib/crypto.js';
 import { logger } from '../../lib/logger.js';
 
 const ASAAS_API = env.ASAAS_SANDBOX
@@ -28,16 +28,23 @@ async function getOrCreateAsaasCustomer(
     [tenantId]
   );
 
+  // Decrypt document from DB (stored encrypted)
+  let tenantDoc = tenant?.document || document || '';
+  if (tenantDoc) {
+    try { tenantDoc = decrypt(tenantDoc); } catch { /* not encrypted or plain text */ }
+  }
+  const cpfCnpj = tenantDoc?.replace(/\D/g, '') || undefined;
   let asaasCustomerId = (tenant?.settings as Record<string, unknown>)?.asaas_customer_id as string | undefined;
 
   if (!asaasCustomerId) {
+    // Create new customer in Asaas
     const customerRes = await fetch(`${ASAAS_API}/customers`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', access_token: env.ASAAS_API_KEY },
       body: JSON.stringify({
         name: tenant?.name || tenantName,
         email,
-        cpfCnpj: (tenant?.document || document)?.replace(/\D/g, '') || undefined,
+        cpfCnpj,
         externalReference: tenantId,
       }),
     });
@@ -55,6 +62,17 @@ async function getOrCreateAsaasCustomer(
       'UPDATE tenants SET settings = $1, updated_at = NOW() WHERE id = $2',
       [JSON.stringify(updatedSettings), tenantId]
     );
+  } else if (cpfCnpj) {
+    // Customer exists — update cpfCnpj if we have it (may have been created without)
+    try {
+      await fetch(`${ASAAS_API}/customers/${asaasCustomerId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', access_token: env.ASAAS_API_KEY },
+        body: JSON.stringify({ cpfCnpj }),
+      });
+    } catch {
+      // Non-blocking — customer update failure shouldn't prevent PIX generation
+    }
   }
 
   return asaasCustomerId;
@@ -89,6 +107,23 @@ export async function registerAsaasPixRoutes(app: FastifyInstance) {
 
       if (!amount || amount <= 0) {
         return reply.status(400).send({ error: 'Valor inválido' });
+      }
+
+      // Check if tenant has CPF/CNPJ (required by Asaas for PIX)
+      const tenantCheck = await queryOne<{ document: string | null }>(
+        'SELECT document FROM tenants WHERE id = $1',
+        [user.tenantId]
+      );
+
+      let docValue = tenantCheck?.document || '';
+      if (docValue) {
+        try { docValue = decrypt(docValue); } catch { /* plain text */ }
+      }
+      if (!docValue?.replace(/\D/g, '')) {
+        return reply.status(400).send({
+          error: 'CPF ou CNPJ não cadastrado. Acesse Configurações e preencha seu CPF ou CNPJ antes de recarregar.',
+          code: 'MISSING_DOCUMENT',
+        });
       }
 
       const tenant = await queryOne<{
