@@ -68,10 +68,10 @@ export async function registerUserRoutes(app: FastifyInstance) {
         : await queryOne<{ id: string }>(`SELECT id FROM plans WHERE is_active = true ORDER BY price ASC LIMIT 1`);
 
       if (plan) {
-        const billingDay = body.billing_day || 10;
+        const billingDay = new Date().getDate(); // dia de criação = dia de cobrança
         await query(
           `INSERT INTO subscriptions (tenant_id, plan_id, status, billing_day, current_period_start, current_period_end)
-           VALUES ($1, $2, 'active', $3, NOW(), NOW() + INTERVAL '30 days')`,
+           VALUES ($1, $2, 'pending', $3, NOW(), NOW() + INTERVAL '30 days')`,
           [tenant.id, plan.id, billingDay]
         );
       }

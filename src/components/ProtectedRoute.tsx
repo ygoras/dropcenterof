@@ -1,7 +1,7 @@
-import { Navigate, useLocation } from "react-router-dom";
+import { Navigate, useLocation, Link } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { useRole } from "@/hooks/useRole";
-import { AlertTriangle, CreditCard } from "lucide-react";
+import { AlertTriangle, CreditCard, Sparkles } from "lucide-react";
 
 interface ProtectedRouteProps {
   children: React.ReactNode;
@@ -14,6 +14,7 @@ export const ProtectedRoute = ({ children, requiredPortal }: ProtectedRouteProps
   const isOperator = hasRole("operator");
   const location = useLocation();
 
+  const isPending = user?.subscription_status === "pending" && !isAdmin && !isManager;
   const isBlocked = user?.subscription_status === "blocked" && !isAdmin && !isManager;
 
   if (authLoading || roleLoading) {
@@ -41,6 +42,40 @@ export const ProtectedRoute = ({ children, requiredPortal }: ProtectedRouteProps
   // Sellers trying to access platform routes -> redirect to seller dashboard
   if (isSeller && !isAdmin && !isManager && isOnPlatformRoute) {
     return <Navigate to="/seller/dashboard" replace />;
+  }
+
+  // Allow access to /seller/plano even when pending (so they can pay)
+  if (isPending && !location.pathname.startsWith("/seller/plano")) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background p-8">
+        <div className="max-w-md w-full text-center animate-fade-in">
+          <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mx-auto mb-6">
+            <Sparkles className="w-8 h-8 text-primary" />
+          </div>
+          <h1 className="font-display text-2xl font-bold text-foreground mb-2">
+            Ative sua assinatura
+          </h1>
+          <p className="text-muted-foreground mb-6">
+            Bem-vindo ao DropCenter! Para acessar a plataforma, ative sua assinatura realizando o pagamento do plano.
+          </p>
+          <Link
+            to="/seller/plano"
+            className="inline-flex items-center gap-2 px-6 py-3 rounded-lg gradient-primary text-primary-foreground font-medium text-sm hover:opacity-90 transition-opacity"
+          >
+            <CreditCard className="w-4 h-4" />
+            Ir para Meu Plano
+          </Link>
+          <div className="mt-4">
+            <button
+              onClick={() => signOut()}
+              className="text-sm text-muted-foreground hover:text-foreground underline transition-colors"
+            >
+              Sair da conta
+            </button>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   if (isBlocked) {
