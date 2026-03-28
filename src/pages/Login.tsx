@@ -22,23 +22,10 @@ const Login = () => {
     signOut();
   }
 
-  const redirectByRole = async () => {
-    try {
-      const me = await api.get<{ roles: string[] }>("/api/auth/me");
-      const isAdmin = me.roles?.some((r) => r === "admin" || r === "manager");
-      const isOperator = me.roles?.some((r) => r === "operator");
-      if (isOperator) navigate("/operacao");
-      else if (isAdmin) navigate("/dashboard");
-      else navigate("/seller/dashboard");
-    } catch {
-      navigate("/dashboard");
-    }
-  };
-
   const completeSignIn = async (sessionId: string) => {
     await setActive({ session: sessionId });
-    await new Promise(resolve => setTimeout(resolve, 300));
-    await redirectByRole();
+    // Redirect to root — ProtectedRoute will handle role-based routing
+    window.location.href = "/";
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
