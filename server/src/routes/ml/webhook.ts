@@ -15,34 +15,46 @@ interface MlCredential {
   ml_user_id: string;
 }
 
-// Shared function to register webhook topics - used by OAuth, manual re-register, and token refresh
-export async function registerMlWebhookTopics(accessToken: string, tenantId: string): Promise<{ success: boolean; error?: string }> {
-  const webhookUrl = env.APP_URL + '/api/webhooks/ml';
+// Check missed webhook feeds from ML to recover lost notifications
+export async function checkMissedFeeds(): Promise<void> {
+  if (!env.ML_APP_ID) return;
   try {
-    const res = await fetch(`${ML_API}/applications/${env.ML_APP_ID}/webhooks`, {
-      method: 'PUT',
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        'Content-Type': 'application/json',
-        Accept: 'application/json',
-      },
-      body: JSON.stringify({
-        callback_url: webhookUrl,
-        topics: ['items', 'orders_v2', 'shipments', 'questions'],
-      }),
+    const res = await fetch(`${ML_API}/missed_feeds?app_id=${env.ML_APP_ID}`, {
+      headers: { Accept: 'application/json' },
     });
+    if (!res.ok) return;
     const data: any = await res.json();
-    logger.info({ status: res.status, topics: data?.topics, tenantId }, 'ML webhook topics registered');
-    return { success: res.ok };
+    const results = data?.results || data || [];
+    if (Array.isArray(results) && results.length > 0) {
+      logger.info({ count: results.length }, 'Processing missed ML feeds');
+      for (const feed of results) {
+        if (feed?.topic && feed?.resource && feed?.user_id) {
+          // Re-process missed notifications by simulating webhook call
+          try {
+            await fetch(`${env.APP_URL}/api/webhooks/ml`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                topic: feed.topic,
+                resource: feed.resource,
+                user_id: feed.user_id,
+                application_id: env.ML_APP_ID,
+              }),
+            });
+          } catch (replayErr) {
+            logger.warn({ err: replayErr, resource: feed.resource }, 'Failed to replay missed feed');
+          }
+        }
+      }
+    }
   } catch (err) {
-    logger.warn({ err, tenantId }, 'Failed to register ML webhook topics');
-    return { success: false, error: String(err) };
+    logger.warn({ err }, 'Failed to check missed ML feeds');
   }
 }
 
 export async function registerMlWebhookRoutes(app: FastifyInstance) {
-  // ─── Register/Re-register webhook topics (authenticated) ──────────
-  app.post('/api/ml/webhook/register', {
+  // ─── Force sync all listings for a tenant (manual trigger) ─────────
+  app.post('/api/ml/webhook/sync', {
     preHandler: [authMiddleware],
   }, async (request, reply) => {
     const tenantId = request.user.tenantId;
@@ -63,14 +75,29 @@ export async function registerMlWebhookRoutes(app: FastifyInstance) {
       return reply.status(401).send({ error: 'Token ML expirado. Reconecte sua conta.' });
     }
 
-    const result = await registerMlWebhookTopics(cred.access_token, tenantId);
-    if (result.success) {
-      return reply.send({ success: true, message: 'Webhook topics registrados com sucesso' });
+    // Sync all listings that have ml_item_id
+    const listings = await queryMany<{ id: string; ml_item_id: string }>(
+      `SELECT id, ml_item_id FROM ml_listings WHERE tenant_id = $1 AND ml_item_id IS NOT NULL`,
+      [tenantId]
+    );
+
+    let synced = 0;
+    for (const listing of listings) {
+      try {
+        // Simulate an item notification to trigger full sync
+        await handleItemNotification(cred, `/items/${listing.ml_item_id}`);
+        synced++;
+      } catch (err) {
+        logger.warn({ err, mlItemId: listing.ml_item_id }, 'Failed to sync listing');
+      }
     }
-    return reply.status(500).send({ error: 'Falha ao registrar webhook topics', detail: result.error });
+
+    return reply.send({ success: true, synced, total: listings.length });
   });
 
   // ─── ML Webhook (no auth - external webhook) ───────────────────────
+  // CRITICAL: ML requires HTTP 200 within 500ms or it disables topics!
+  // We respond immediately and process asynchronously.
   app.post('/api/webhooks/ml', async (request, reply) => {
     // Optional HMAC signature verification
     if (env.ML_WEBHOOK_SECRET) {
@@ -85,57 +112,56 @@ export async function registerMlWebhookRoutes(app: FastifyInstance) {
       }
     }
 
-    try {
-      const body = request.body as { topic?: string; resource?: string; user_id?: number | string };
-      const { topic, resource, user_id: mlUserId } = body;
+    const body = request.body as { topic?: string; resource?: string; user_id?: number | string };
+    const { topic, resource, user_id: mlUserId } = body;
 
-      logger.info({ topic, resource, mlUserId }, 'ML webhook received');
+    logger.info({ topic, resource, mlUserId }, 'ML webhook received');
 
-      // Find the tenant associated with this ML user
-      const credential = await queryOne<MlCredential>(
-        `SELECT id, tenant_id, access_token, expires_at, ml_user_id
-         FROM ml_credentials
-         WHERE ml_user_id = $1
-         LIMIT 1`,
-        [String(mlUserId)]
-      );
+    // RESPOND IMMEDIATELY with 200 — ML needs this within 500ms
+    reply.send({ status: 'received' });
 
-      if (!credential) {
-        logger.warn({ mlUserId }, 'Credential not found for ML user');
-        return reply.send({ status: 'ignored', reason: 'credential_not_found' });
+    // Process asynchronously AFTER responding
+    setImmediate(async () => {
+      try {
+        const credential = await queryOne<MlCredential>(
+          `SELECT id, tenant_id, access_token, expires_at, ml_user_id
+           FROM ml_credentials
+           WHERE ml_user_id = $1
+           LIMIT 1`,
+          [String(mlUserId)]
+        );
+
+        if (!credential) {
+          logger.warn({ mlUserId }, 'Credential not found for ML user');
+          return;
+        }
+
+        if (new Date(credential.expires_at) < new Date()) {
+          logger.warn({ tenantId: credential.tenant_id }, 'Token expired, skipping webhook processing');
+          return;
+        }
+
+        switch (topic) {
+          case 'items':
+            await handleItemNotification(credential, resource || '');
+            break;
+          case 'orders_v2':
+          case 'orders':
+            await handleOrderNotification(credential, resource || '');
+            break;
+          case 'shipments':
+            await handleShipmentNotification(credential, resource || '');
+            break;
+          case 'questions':
+            logger.info({ tenantId: credential.tenant_id, resource }, 'Question notification received');
+            break;
+          default:
+            logger.info({ topic }, 'Unhandled ML webhook topic');
+        }
+      } catch (err) {
+        logger.error({ err, topic, resource }, 'Async webhook processing error');
       }
-
-      // Check token validity
-      if (new Date(credential.expires_at) < new Date()) {
-        logger.warn({ tenantId: credential.tenant_id }, 'Token expired');
-        return reply.send({ status: 'ignored', reason: 'token_expired' });
-      }
-
-      // Handle different topics
-      switch (topic) {
-        case 'items':
-          await handleItemNotification(credential, resource || '');
-          break;
-        case 'orders_v2':
-        case 'orders':
-          await handleOrderNotification(credential, resource || '');
-          break;
-        case 'shipments':
-          await handleShipmentNotification(credential, resource || '');
-          break;
-        case 'questions':
-          logger.info({ tenantId: credential.tenant_id, resource }, 'Question notification received');
-          break;
-        default:
-          logger.info({ topic }, 'Unhandled ML webhook topic');
-      }
-
-      return reply.send({ status: 'received' });
-    } catch (err) {
-      logger.error({ err }, 'Webhook processing error');
-      // Always return 200 to ML so they don't retry excessively
-      return reply.send({ status: 'error' });
-    }
+    });
   });
 }
 

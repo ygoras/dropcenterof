@@ -4,7 +4,7 @@ import { query } from '../../lib/db.js';
 import { hmacSha256, verifyHmac } from '../../lib/crypto.js';
 import { authMiddleware } from '../../middleware/auth.js';
 import { logger } from '../../lib/logger.js';
-import { registerMlWebhookTopics } from './webhook.js';
+// Webhook topics are configured in the ML app dashboard, not via API
 
 const ML_AUTH_URL = 'https://auth.mercadolivre.com.br/authorization';
 const ML_TOKEN_URL = 'https://api.mercadolibre.com/oauth/token';
@@ -173,8 +173,8 @@ export async function registerMlOAuthRoutes(app: FastifyInstance) {
 
       logger.info({ tenantId, mlUserId }, 'ML OAuth credentials saved');
 
-      // Register webhook subscriptions so ML sends notifications automatically
-      await registerMlWebhookTopics(access_token, tenantId);
+      // Webhook topics are configured in the ML app dashboard
+      // No API registration needed - topics: items, orders_v2, shipments, questions
 
       // Return success HTML page
       const displayName = mlNickname || String(mlUserId);

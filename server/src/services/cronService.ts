@@ -25,5 +25,15 @@ export function startCronJobs(): void {
     }
   });
 
-  logger.info('Cron jobs started: ML token refresh (*/20min), Billing (daily 08:00)');
+  // Check missed ML webhook feeds every 5 minutes
+  cron.schedule('*/5 * * * *', async () => {
+    try {
+      const { checkMissedFeeds } = await import('../routes/ml/webhook.js');
+      await checkMissedFeeds();
+    } catch (err) {
+      logger.error(err, 'ML missed feeds check failed');
+    }
+  });
+
+  logger.info('Cron jobs started: ML token refresh (*/20min), Missed feeds (*/5min), Billing (daily 08:00)');
 }
