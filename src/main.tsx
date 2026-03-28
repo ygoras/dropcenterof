@@ -1,5 +1,5 @@
 import { createRoot } from "react-dom/client";
-import { ClerkProvider } from "@clerk/clerk-react";
+import { ClerkProvider, ClerkLoaded, ClerkLoading } from "@clerk/clerk-react";
 import App from "./App.tsx";
 import "./index.css";
 
@@ -11,6 +11,16 @@ if (!CLERK_PUBLISHABLE_KEY) {
 
 createRoot(document.getElementById("root")!).render(
   <ClerkProvider publishableKey={CLERK_PUBLISHABLE_KEY}>
-    <App />
+    <ClerkLoading>
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <div className="text-center space-y-4">
+          <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin mx-auto" />
+          <p className="text-muted-foreground text-sm">Carregando autenticação...</p>
+        </div>
+      </div>
+    </ClerkLoading>
+    <ClerkLoaded>
+      <App />
+    </ClerkLoaded>
   </ClerkProvider>
 );
