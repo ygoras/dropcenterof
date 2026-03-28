@@ -50,7 +50,8 @@ function buildSuccessPage(displayName: string, appUrl: string): string {
 function signState(tenantId: string, userId: string): string {
   const timestamp = String(Date.now());
   const data = `${tenantId}|${userId}|${timestamp}`;
-  const hmac = hmacSha256(data, env.JWT_SECRET);
+  const secret = env.JWT_SECRET || env.CLERK_SECRET_KEY;
+  const hmac = hmacSha256(data, secret);
   return `${tenantId}|${userId}|${timestamp}|${hmac}`;
 }
 
@@ -63,7 +64,8 @@ function parseAndVerifyState(state: string): { tenantId: string; userId: string 
 
   const data = `${tenantId}|${userId}|${timestamp}`;
   try {
-    if (!verifyHmac(data, signature, env.JWT_SECRET)) return null;
+    const secret = env.JWT_SECRET || env.CLERK_SECRET_KEY;
+    if (!verifyHmac(data, signature, secret)) return null;
   } catch {
     return null;
   }
