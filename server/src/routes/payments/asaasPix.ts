@@ -495,15 +495,24 @@ export async function registerAsaasPixRoutes(app: FastifyInstance) {
         }
       }
 
-      // Correct balance
-      if (balanceAdjust > 0) {
-        await query(
-          `UPDATE wallet_balances SET balance = balance - $1, updated_at = NOW() WHERE tenant_id = $2`,
-          [balanceAdjust, user.tenantId]
-        );
-      }
+      // Recalculate correct balance from confirmed transactions
+      const correctBalance = await queryOne<{ total: number }>(
+        `SELECT COALESCE(
+          (SELECT SUM(amount) FROM wallet_transactions WHERE tenant_id = $1 AND type = 'deposit' AND status = 'confirmed') -
+          (SELECT COALESCE(SUM(amount), 0) FROM wallet_transactions WHERE tenant_id = $1 AND type = 'debit' AND status = 'confirmed'),
+          0
+        ) as total`,
+        [user.tenantId]
+      );
 
-      return reply.send({ removed, balance_adjusted: -balanceAdjust });
+      const newBalance = correctBalance?.total ?? 0;
+      await query(
+        `INSERT INTO wallet_balances (tenant_id, balance, updated_at) VALUES ($1, $2, NOW())
+         ON CONFLICT (tenant_id) DO UPDATE SET balance = $2, updated_at = NOW()`,
+        [user.tenantId, newBalance]
+      );
+
+      return reply.send({ removed, balance_corrected: newBalance });
     }
 
     // ─── ACTION: sync_pending_charges ─────────────────────────
