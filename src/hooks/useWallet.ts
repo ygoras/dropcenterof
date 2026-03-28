@@ -75,5 +75,18 @@ export function useWallet() {
     }
   };
 
-  return { balance, transactions, forecast, loading, generating, generatePix, refetch: fetchData };
+  const cancelCharge = async (referenceId: string) => {
+    const data = await api.post("/api/payments/pix", { action: "cancel_charge", reference_id: referenceId });
+    await fetchData();
+    return data;
+  };
+
+  const reopenPix = async (referenceId: string) => {
+    return api.post<{ pix_code: string; pix_qr_image: string; amount: number; reference_id: string }>(
+      "/api/payments/pix",
+      { action: "reopen_pix", reference_id: referenceId }
+    );
+  };
+
+  return { balance, transactions, forecast, loading, generating, generatePix, cancelCharge, reopenPix, refetch: fetchData };
 }

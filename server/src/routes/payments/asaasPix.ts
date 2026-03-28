@@ -463,9 +463,53 @@ export async function registerAsaasPixRoutes(app: FastifyInstance) {
       });
     }
 
+    // ─── ACTION: cleanup_duplicates ────────────────────────────
+    // Removes duplicate wallet transactions created by the old sync bug.
+    // Finds confirmed deposits that share a reference_id, keeps the oldest, deletes newer ones.
+
+    if (action === 'cleanup_duplicates') {
+      const dupes = await queryMany<{ reference_id: string; cnt: string }>(
+        `SELECT reference_id, COUNT(*) as cnt FROM wallet_transactions
+         WHERE tenant_id = $1 AND type = 'deposit' AND status = 'confirmed' AND reference_id IS NOT NULL
+         GROUP BY reference_id HAVING COUNT(*) > 1`,
+        [user.tenantId]
+      );
+
+      let removed = 0;
+      let balanceAdjust = 0;
+
+      for (const dupe of dupes) {
+        // Keep the oldest, delete the rest
+        const txs = await queryMany<{ id: string; amount: number; created_at: string }>(
+          `SELECT id, amount, created_at FROM wallet_transactions
+           WHERE tenant_id = $1 AND reference_id = $2 AND type = 'deposit' AND status = 'confirmed'
+           ORDER BY created_at ASC`,
+          [user.tenantId, dupe.reference_id]
+        );
+
+        // Delete all but the first (oldest)
+        for (let i = 1; i < txs.length; i++) {
+          await query(`DELETE FROM wallet_transactions WHERE id = $1`, [txs[i].id]);
+          balanceAdjust += txs[i].amount;
+          removed++;
+        }
+      }
+
+      // Correct balance
+      if (balanceAdjust > 0) {
+        await query(
+          `UPDATE wallet_balances SET balance = balance - $1, updated_at = NOW() WHERE tenant_id = $2`,
+          [balanceAdjust, user.tenantId]
+        );
+      }
+
+      return reply.send({ removed, balance_adjusted: -balanceAdjust });
+    }
+
     // ─── ACTION: sync_pending_charges ─────────────────────────
-    // Checks Asaas for actual payment status of pending wallet transactions
-    // and credits the wallet if any were paid but webhook was missed.
+    // Checks Asaas for actual payment status of pending wallet transactions.
+    // If paid but webhook was missed: updates existing TX to confirmed + credits balance.
+    // Does NOT call credit_wallet() to avoid duplicate transactions.
 
     if (action === 'sync_pending_charges') {
       const pending = await queryMany<{
@@ -482,7 +526,7 @@ export async function registerAsaasPixRoutes(app: FastifyInstance) {
       }
 
       let credited = 0;
-      let deleted = 0;
+      let cleaned = 0;
       const results: { id: string; amount: number; asaas_status: string; action: string }[] = [];
 
       for (const tx of pending) {
@@ -500,32 +544,29 @@ export async function registerAsaasPixRoutes(app: FastifyInstance) {
           const asaasStatus = asaasData.status as string;
 
           if (asaasStatus === 'CONFIRMED' || asaasStatus === 'RECEIVED') {
-            // Payment was paid — credit wallet
-            const creditRow = await queryOne<{ credit_wallet: any }>(
-              'SELECT credit_wallet($1, $2, $3, $4, $5)',
-              [user.tenantId, tx.amount, `Recarga PIX confirmada - Asaas #${tx.reference_id}`, tx.reference_id, 'asaas_pix']
+            // Payment was paid — update existing TX + credit balance directly (no duplicate TX)
+            const balanceRow = await queryOne<{ balance: number }>(
+              `UPDATE wallet_balances
+               SET balance = balance + $1, updated_at = NOW()
+               WHERE tenant_id = $2
+               RETURNING balance`,
+              [tx.amount, user.tenantId]
             );
-            const creditResult = typeof creditRow?.credit_wallet === 'string'
-              ? JSON.parse(creditRow.credit_wallet)
-              : creditRow?.credit_wallet;
 
-            if (creditResult?.success) {
-              await query(
-                `UPDATE wallet_transactions SET status = 'confirmed', confirmed_at = NOW() WHERE id = $1`,
-                [tx.id]
-              );
-              credited++;
-              results.push({ id: tx.reference_id, amount: tx.amount, asaas_status: asaasStatus, action: 'credited' });
-            } else {
-              results.push({ id: tx.reference_id, amount: tx.amount, asaas_status: asaasStatus, action: 'credit_failed' });
-            }
-          } else if (asaasStatus === 'OVERDUE' || asaasStatus === 'DELETED' || asaasStatus === 'REFUNDED') {
-            // Payment expired/cancelled — mark as failed
             await query(
-              `UPDATE wallet_transactions SET status = 'failed' WHERE id = $1`,
-              [tx.id]
+              `UPDATE wallet_transactions
+               SET status = 'confirmed', confirmed_at = NOW(),
+                   balance_after = $1,
+                   description = $2
+               WHERE id = $3`,
+              [balanceRow?.balance ?? null, `Recarga PIX confirmada - Asaas #${tx.reference_id}`, tx.id]
             );
-            deleted++;
+
+            credited++;
+            results.push({ id: tx.reference_id, amount: tx.amount, asaas_status: asaasStatus, action: 'credited' });
+          } else if (asaasStatus === 'OVERDUE' || asaasStatus === 'DELETED' || asaasStatus === 'REFUNDED') {
+            await query(`UPDATE wallet_transactions SET status = 'failed' WHERE id = $1`, [tx.id]);
+            cleaned++;
             results.push({ id: tx.reference_id, amount: tx.amount, asaas_status: asaasStatus, action: 'marked_failed' });
           } else {
             results.push({ id: tx.reference_id, amount: tx.amount, asaas_status: asaasStatus, action: 'still_pending' });
@@ -535,7 +576,103 @@ export async function registerAsaasPixRoutes(app: FastifyInstance) {
         }
       }
 
-      return reply.send({ synced: credited, cleaned: deleted, details: results });
+      return reply.send({ synced: credited, cleaned, details: results });
+    }
+
+    // ─── ACTION: cancel_charge ──────────────────────────────────
+    // Cancels a pending PIX charge in Asaas and marks the wallet TX as cancelled.
+
+    if (action === 'cancel_charge') {
+      const { reference_id } = body as any;
+      if (!reference_id) {
+        return reply.status(400).send({ error: 'reference_id é obrigatório' });
+      }
+
+      const tx = await queryOne<{ id: string; status: string }>(
+        `SELECT id, status FROM wallet_transactions
+         WHERE tenant_id = $1 AND reference_id = $2 AND type = 'deposit'`,
+        [user.tenantId, reference_id]
+      );
+
+      if (!tx) return reply.status(404).send({ error: 'Transação não encontrada' });
+      if (tx.status !== 'pending') return reply.status(400).send({ error: 'Só é possível cancelar cobranças pendentes' });
+
+      // Delete charge in Asaas
+      try {
+        const delRes = await fetch(`${ASAAS_API}/payments/${reference_id}`, {
+          method: 'DELETE',
+          headers: { access_token: env.ASAAS_API_KEY },
+        });
+        if (!delRes.ok) {
+          const errText = await delRes.text();
+          logger.warn({ reference_id, status: delRes.status, error: errText }, 'Asaas charge delete failed');
+        }
+      } catch (err) {
+        logger.warn({ reference_id }, 'Failed to delete Asaas charge');
+      }
+
+      await query(`UPDATE wallet_transactions SET status = 'cancelled' WHERE id = $1`, [tx.id]);
+
+      return reply.send({ status: 'cancelled', reference_id });
+    }
+
+    // ─── ACTION: reopen_pix ─────────────────────────────────────
+    // Returns stored PIX QR code and payment link for a pending charge.
+
+    if (action === 'reopen_pix') {
+      const { reference_id } = body as any;
+      if (!reference_id) {
+        return reply.status(400).send({ error: 'reference_id é obrigatório' });
+      }
+
+      const tx = await queryOne<{ id: string; status: string; amount: number; metadata: any }>(
+        `SELECT id, status, amount, metadata FROM wallet_transactions
+         WHERE tenant_id = $1 AND reference_id = $2 AND type = 'deposit'`,
+        [user.tenantId, reference_id]
+      );
+
+      if (!tx) return reply.status(404).send({ error: 'Transação não encontrada' });
+      if (tx.status !== 'pending') return reply.status(400).send({ error: 'Só é possível reabrir cobranças pendentes' });
+
+      const meta = typeof tx.metadata === 'string' ? JSON.parse(tx.metadata) : tx.metadata;
+
+      // Decrypt stored PIX data
+      let pixCode = meta?.pix_code || null;
+      let pixQrImage = meta?.pix_qr_image || null;
+
+      if (pixCode) {
+        try { pixCode = decrypt(pixCode); } catch { /* already plain */ }
+      }
+      if (pixQrImage) {
+        try { pixQrImage = decrypt(pixQrImage); } catch { /* already plain */ }
+      }
+
+      // If we don't have stored data, try fetching fresh from Asaas
+      if (!pixCode) {
+        try {
+          const pixRes = await fetch(`${ASAAS_API}/payments/${reference_id}/pixQrCode`, {
+            headers: { access_token: env.ASAAS_API_KEY },
+          });
+          if (pixRes.ok) {
+            const pixData: any = await pixRes.json();
+            pixCode = pixData.payload || null;
+            pixQrImage = pixData.encodedImage || null;
+          }
+        } catch {
+          // ignore
+        }
+      }
+
+      if (!pixCode) {
+        return reply.status(400).send({ error: 'QR Code não disponível. A cobrança pode ter expirado.' });
+      }
+
+      return reply.send({
+        pix_code: pixCode,
+        pix_qr_image: pixQrImage,
+        amount: tx.amount,
+        reference_id,
+      });
     }
 
     return reply.status(400).send({ error: 'Ação inválida' });

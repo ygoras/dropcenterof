@@ -14,6 +14,8 @@ import {
   ShieldCheck,
   RefreshCw,
   Banknote,
+  Trash2,
+  Eye,
 } from "lucide-react";
 import { useWallet, type WalletTransaction } from "@/hooks/useWallet";
 import { StatusBadge } from "@/components/StatusBadge";
@@ -37,7 +39,7 @@ const formatDate = (date: string) => {
 };
 
 const SellerCredito = () => {
-  const { balance, transactions, forecast, loading, generating, generatePix } = useWallet();
+  const { balance, transactions, forecast, loading, generating, generatePix, cancelCharge, reopenPix, refetch } = useWallet();
   const [rechargeOpen, setRechargeOpen] = useState(false);
   const [rechargeAmount, setRechargeAmount] = useState("");
   const [pixResult, setPixResult] = useState<{ pix_code: string; pix_qr_image: string; amount: number } | null>(null);
@@ -232,7 +234,23 @@ const SellerCredito = () => {
         ) : (
           <div className="divide-y divide-border max-h-[400px] overflow-y-auto">
             {transactions.map((tx) => (
-              <TransactionRow key={tx.id} tx={tx} />
+              <TransactionRow
+                key={tx.id}
+                tx={tx}
+                onCancel={cancelCharge}
+                onReopen={async (refId) => {
+                  try {
+                    const result = await reopenPix(refId);
+                    if (result?.pix_code) {
+                      setPixResult({ pix_code: result.pix_code, pix_qr_image: result.pix_qr_image, amount: result.amount });
+                    } else {
+                      toast({ title: "QR Code indisponível", description: "A cobrança pode ter expirado.", variant: "destructive" });
+                    }
+                  } catch {
+                    toast({ title: "Erro ao reabrir QR Code", variant: "destructive" });
+                  }
+                }}
+              />
             ))}
           </div>
         )}
@@ -317,9 +335,16 @@ const SellerCredito = () => {
   );
 };
 
-function TransactionRow({ tx }: { tx: WalletTransaction }) {
+function TransactionRow({ tx, onCancel, onReopen }: {
+  tx: WalletTransaction;
+  onCancel: (refId: string) => Promise<any>;
+  onReopen: (refId: string) => Promise<void>;
+}) {
+  const [cancelling, setCancelling] = useState(false);
+  const [reopening, setReopening] = useState(false);
   const isDeposit = tx.type === "deposit";
   const isRefund = tx.type === "refund";
+  const isPendingDeposit = isDeposit && tx.status === "pending" && tx.reference_id;
 
   const icon = isDeposit ? (
     <ArrowDownLeft className="w-4 h-4 text-success" />
@@ -352,6 +377,36 @@ function TransactionRow({ tx }: { tx: WalletTransaction }) {
         </div>
       </div>
       <div className="flex items-center gap-2 shrink-0">
+        {isPendingDeposit && (
+          <>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 px-2 text-xs gap-1"
+              disabled={reopening}
+              onClick={async () => {
+                setReopening(true);
+                try { await onReopen(tx.reference_id!); } finally { setReopening(false); }
+              }}
+            >
+              {reopening ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Eye className="w-3 h-3" />}
+              QR Code
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 px-2 text-xs gap-1 text-destructive hover:text-destructive"
+              disabled={cancelling}
+              onClick={async () => {
+                setCancelling(true);
+                try { await onCancel(tx.reference_id!); } finally { setCancelling(false); }
+              }}
+            >
+              {cancelling ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
+              Cancelar
+            </Button>
+          </>
+        )}
         <StatusBadge status={statusMap[tx.status] ?? tx.status} />
         <span className="text-[10px] text-muted-foreground whitespace-nowrap">{formatDate(tx.created_at)}</span>
       </div>
