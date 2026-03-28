@@ -347,7 +347,7 @@ async function handlePublish(cred: MlCredRow, tenantId: string, listingId: strin
       }
     }
     if (!saleFeeAmount && listing.price > 0) {
-      const pct = listingTypeId === 'gold_pro' ? 0.16 : 0.115;
+      const pct = listingTypeId === 'gold_pro' ? 0.165 : 0.125;
       saleFeeAmount = Math.round(listing.price * pct * 100) / 100;
     }
   } catch (err) {
@@ -498,7 +498,7 @@ async function handleUpdate(cred: MlCredRow, listingId: string, newListingTypeId
       }
     }
     if (!saleFeeAmount && listing.price > 0) {
-      const pct = listingTypeId === 'gold_pro' ? 0.16 : 0.115;
+      const pct = listingTypeId === 'gold_pro' ? 0.165 : 0.125;
       saleFeeAmount = Math.round(listing.price * pct * 100) / 100;
     }
   } catch (err) {
@@ -681,7 +681,7 @@ async function handleGetFees(cred: MlCredRow, body: any, reply: any) {
 
   // Fallback
   if (!saleFeeAmount && price > 0) {
-    const pct = ltId === 'gold_pro' ? 0.16 : 0.115;
+    const pct = ltId === 'gold_pro' ? 0.165 : 0.125;
     saleFeeAmount = Math.round(price * pct * 100) / 100;
   }
 
@@ -729,7 +729,7 @@ async function handleRefresh(cred: MlCredRow, listingId: string, reply: any) {
       }
     }
     if (!saleFeeAmount && listing.price > 0) {
-      const pct = ltId === 'gold_pro' ? 0.16 : 0.115;
+      const pct = ltId === 'gold_pro' ? 0.165 : 0.125;
       saleFeeAmount = Math.round(listing.price * pct * 100) / 100;
     }
   } catch (err) {

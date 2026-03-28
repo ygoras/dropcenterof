@@ -17,6 +17,7 @@ interface MlPriceCalculatorProps {
   productDimensions?: ProductDimensions | null;
   productWeightKg?: number | null;
   productCondition?: string;
+  categoryId?: string | null;
 }
 
 interface PriceBreakdown {
@@ -33,9 +34,10 @@ interface PriceBreakdown {
 const formatCurrency = (v: number) =>
   v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 
+// Valores padrão aproximados — a API listing_prices retorna o valor exato
 const LISTING_COMMISSIONS: Record<string, number> = {
-  gold_pro: 16,
-  gold_special: 11.5,
+  gold_pro: 16.5,
+  gold_special: 12.5,
 };
 
 export function MlPriceCalculator({
@@ -47,6 +49,7 @@ export function MlPriceCalculator({
   productDimensions,
   productWeightKg,
   productCondition,
+  categoryId,
 }: MlPriceCalculatorProps) {
   const defaultCommission = listingType ? (LISTING_COMMISSIONS[listingType] || 11) : 11;
   const [markup, setMarkup] = useState("30");
@@ -85,13 +88,18 @@ export function MlPriceCalculator({
     if (price <= 0) return;
     setFetchingFees(true);
     try {
-      const data = await api.post<{ sale_fee_amount?: number }>("/api/ml/sync", {
+      const data = await api.post<{ sale_fee_amount?: number; fee_details?: { percentage_fee?: number } }>("/api/ml/sync", {
         action: "get_fees",
         price: Math.round(price * 100) / 100,
         listing_type_id: listingType || "gold_special",
+        category_id: categoryId || undefined,
       });
       if (data?.sale_fee_amount) {
         setRealMlFee(data.sale_fee_amount);
+        // Update commission % with real value from API
+        if (data.fee_details?.percentage_fee) {
+          setMlCommission(String(data.fee_details.percentage_fee));
+        }
       }
     } catch (err) {
       console.warn("Could not fetch real ML fees:", err);

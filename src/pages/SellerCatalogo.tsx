@@ -299,13 +299,13 @@ const SellerCatalogo = () => {
                         <SelectItem value="gold_pro">
                           <div className="flex items-center gap-2">
                             <span>Premium</span>
-                            <span className="text-[10px] text-muted-foreground">~17%</span>
+                            <span className="text-[10px] text-muted-foreground">~16.5%</span>
                           </div>
                         </SelectItem>
                         <SelectItem value="gold_special">
                           <div className="flex items-center gap-2">
                             <span>Clássica</span>
-                            <span className="text-[10px] text-muted-foreground">~12%</span>
+                            <span className="text-[10px] text-muted-foreground">~12.5%</span>
                           </div>
                         </SelectItem>
                       </SelectContent>
@@ -324,6 +324,7 @@ const SellerCatalogo = () => {
                     productDimensions={detailProduct.dimensions as { length: number; width: number; height: number } | null}
                     productWeightKg={detailProduct.weight_kg}
                     productCondition={detailProduct.condition}
+                    categoryId={detailProduct.ml_category_id}
                   />
                 </div>
               </div>
