@@ -6,13 +6,14 @@ export async function registerSecurityHeaders(app: FastifyInstance): Promise<voi
     contentSecurityPolicy: {
       directives: {
         defaultSrc: ["'self'"],
-        scriptSrc: ["'self'"],
+        scriptSrc: ["'self'", "https://clerk.dropcenter.com.br"],
         styleSrc: ["'self'", "'unsafe-inline'"],
         imgSrc: ["'self'", 'data:', 'https:'],
-        connectSrc: ["'self'"],
+        connectSrc: ["'self'", "https://clerk.dropcenter.com.br", "https://contas.dropcenter.com.br"],
         fontSrc: ["'self'"],
         objectSrc: ["'none'"],
         frameAncestors: ["'none'"],
+        workerSrc: ["'self'", "blob:"],
       },
     },
     hsts: {
