@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Boxes, Eye, EyeOff, Mail, Lock, ArrowRight, ShieldCheck } from "lucide-react";
-import { useSignIn, useClerk } from "@clerk/clerk-react";
+import { useSignIn, useClerk, useAuth as useClerkAuth } from "@clerk/clerk-react";
 import { toast } from "@/hooks/use-toast";
 import { api } from "@/lib/apiClient";
 
@@ -13,8 +13,14 @@ const Login = () => {
   const [needsVerification, setNeedsVerification] = useState(false);
   const [loading, setLoading] = useState(false);
   const { signIn, isLoaded } = useSignIn();
-  const { setActive } = useClerk();
+  const { setActive, signOut } = useClerk();
+  const { isSignedIn } = useClerkAuth();
   const navigate = useNavigate();
+
+  // If already signed in, sign out first (clean slate for login page)
+  if (isSignedIn) {
+    signOut();
+  }
 
   const redirectByRole = async () => {
     try {
