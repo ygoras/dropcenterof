@@ -27,13 +27,17 @@ async function queryWithRls<T extends QueryResultRow>(
 
   const client = await pool.connect();
   try {
+    // SET LOCAL only works inside a transaction
+    await client.query('BEGIN');
     await client.query(`SET LOCAL app.tenant_id = $1`, [ctx.tenantId || '']);
     await client.query(`SET LOCAL app.is_admin = $1`, [ctx.isAdmin ? 'true' : 'false']);
-    return await client.query<T>(text, params);
+    const result = await client.query<T>(text, params);
+    await client.query('COMMIT');
+    return result;
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
   } finally {
-    // Reset session vars before returning to pool
-    await client.query(`RESET app.tenant_id`).catch(() => {});
-    await client.query(`RESET app.is_admin`).catch(() => {});
     client.release();
   }
 }

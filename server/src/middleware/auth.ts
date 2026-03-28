@@ -64,12 +64,12 @@ export async function authMiddleware(
     }
 
     // Get roles (direct pool query, no RLS)
-    const rolesResult = await pool.query<{ roles: string[] }>(
-      `SELECT ARRAY_AGG(role) as roles FROM user_roles WHERE user_id = $1`,
+    const rolesResult = await pool.query<{ role: string }>(
+      `SELECT role FROM user_roles WHERE user_id = $1`,
       [profile.id]
     );
 
-    const roles = rolesResult.rows[0]?.roles ?? [];
+    const roles = rolesResult.rows.map(r => r.role);
     const isAdmin = roles.includes('admin') || roles.includes('manager');
 
     request.user = {
