@@ -97,9 +97,14 @@ async function start() {
     );
   });
 
-  // Frontend calls /api/webhooks/asaas for Asaas webhooks
+  // Asaas sends webhooks to /api/webhooks/asaas — proxy to internal handler with headers
   app.post('/api/webhooks/asaas', async (request, reply) => {
-    const res = await app.inject({ method: 'POST', url: '/api/payments/webhook', payload: request.body as object });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/payments/webhook',
+      payload: request.body as object,
+      headers: request.headers as Record<string, string>,
+    });
     reply.status(res.statusCode).send(JSON.parse(res.payload));
   });
 
