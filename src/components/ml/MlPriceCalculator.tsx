@@ -85,7 +85,7 @@ export function MlPriceCalculator({
     if (price <= 0) return;
     setFetchingFees(true);
     try {
-      const data = await api.post<{ sale_fee_amount?: number }>("/api/ml-sync", {
+      const data = await api.post<{ sale_fee_amount?: number }>("/api/ml/sync", {
         action: "get_fees",
         price: Math.round(price * 100) / 100,
         listing_type_id: listingType || "gold_special",
@@ -116,7 +116,7 @@ export function MlPriceCalculator({
       const markupVal = parseFloat(markup) || 0;
       const estimatedPrice = basePrice * (1 + markupVal / 100);
 
-      const data = await api.post<{ error?: string; ml_error?: string; shipping_cost?: number; billable_weight?: number }>("/api/ml-shipping-cost", {
+      const data = await api.post<{ error?: string; ml_error?: string; shipping_cost?: number; billable_weight?: number }>("/api/ml/shipping-cost", {
         dimensions: productDimensions,
         weight_kg: productWeightKg,
         item_price: estimatedPrice,

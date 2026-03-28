@@ -51,7 +51,7 @@ export function EditPriceDialog({
     setEditFeeLoading(true);
     setEditMlFee(null);
     try {
-      const data = await api.post<{ sale_fee_amount?: number }>("/api/ml-sync", {
+      const data = await api.post<{ sale_fee_amount?: number }>("/api/ml/sync", {
         action: "get_fees", price, category_id: categoryId, listing_type_id: ltId,
       });
       if (data?.sale_fee_amount !== undefined) {
