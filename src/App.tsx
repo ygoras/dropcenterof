@@ -8,7 +8,7 @@ import { ThemeProvider } from "@/components/ThemeProvider";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
 import { AppLayout } from "@/components/AppLayout";
 import Login from "./pages/Login";
-import Registro from "./pages/Registro";
+// Registro removido — vendedores são criados pelo admin
 import Dashboard from "./pages/Dashboard";
 import Vendedores from "./pages/Vendedores";
 import Financeiro from "./pages/Financeiro";
@@ -56,7 +56,7 @@ const App = () => (
               {/* Auth */}
               <Route path="/" element={<Navigate to="/login" replace />} />
               <Route path="/login" element={<Login />} />
-              <Route path="/registro" element={<Registro />} />
+              {/* Registro removido — vendedores são criados pelo admin */}
 
               {/* Portal Interno (Plataforma) */}
               <Route element={<ProtectedRoute><AppLayout portal="platform" /></ProtectedRoute>}>

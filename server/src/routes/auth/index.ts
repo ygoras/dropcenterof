@@ -77,4 +77,53 @@ export async function registerAuthRoutes(app: FastifyInstance) {
 
     return reply.send({ received: true });
   });
+
+  // Admin: migrate existing users to Clerk (one-time use)
+  app.post('/api/admin/migrate-to-clerk', {
+    preHandler: [authMiddleware],
+  }, async (request, reply) => {
+    // Only admin can run this
+    if (!request.user.roles.includes('admin')) {
+      return reply.status(403).send({ error: 'Admin only' });
+    }
+
+    const { rows: users } = await query<{
+      id: string; email: string; name: string; password_hash: string; clerk_user_id: string | null;
+    }>(
+      `SELECT au.id, au.email, au.password_hash, au.clerk_user_id, p.name
+       FROM auth_users au
+       JOIN profiles p ON p.id = au.id
+       WHERE au.clerk_user_id IS NULL`
+    );
+
+    const results: { email: string; status: string; clerkId?: string }[] = [];
+
+    for (const user of users) {
+      try {
+        // Create user in Clerk
+        const nameParts = (user.name || user.email.split('@')[0]).split(' ');
+        const clerkUser = await clerkClient.users.createUser({
+          emailAddress: [user.email],
+          firstName: nameParts[0],
+          lastName: nameParts.slice(1).join(' ') || undefined,
+          skipPasswordRequirement: true,
+        });
+
+        // Link clerk_user_id in our DB
+        await query(
+          `UPDATE auth_users SET clerk_user_id = $1 WHERE id = $2`,
+          [clerkUser.id, user.id]
+        );
+
+        results.push({ email: user.email, status: 'migrated', clerkId: clerkUser.id });
+        logger.info({ email: user.email, clerkId: clerkUser.id }, 'User migrated to Clerk');
+      } catch (err: any) {
+        const msg = err?.errors?.[0]?.longMessage || err?.message || 'Unknown error';
+        results.push({ email: user.email, status: `failed: ${msg}` });
+        logger.warn({ email: user.email, error: msg }, 'Failed to migrate user to Clerk');
+      }
+    }
+
+    return reply.send({ migrated: results.filter(r => r.status === 'migrated').length, total: users.length, results });
+  });
 }
