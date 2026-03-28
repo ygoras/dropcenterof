@@ -102,7 +102,8 @@ const SellerPlano = () => {
     setAllPlans(plansData ?? []);
 
     const subRes = await api.get<any>(`/api/subscriptions?tenant_id=${profile.tenant_id}`);
-    const subData = subRes ?? null;
+    // API returns array, we need the first (most recent) subscription
+    const subData = Array.isArray(subRes) ? subRes[0] ?? null : subRes ?? null;
 
     setSubscription(subData);
 
