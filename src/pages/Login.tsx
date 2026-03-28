@@ -1,9 +1,8 @@
-import { useState, useEffect, useRef } from "react";
-import { useNavigate } from "react-router-dom";
+import { useState } from "react";
+import { Navigate } from "react-router-dom";
 import { Boxes, Eye, EyeOff, Mail, Lock, ArrowRight, ShieldCheck } from "lucide-react";
 import { useSignIn, useClerk, useAuth as useClerkAuth } from "@clerk/clerk-react";
 import { toast } from "@/hooks/use-toast";
-import { api } from "@/lib/apiClient";
 
 const Login = () => {
   const [showPassword, setShowPassword] = useState(false);
@@ -13,23 +12,17 @@ const Login = () => {
   const [needsVerification, setNeedsVerification] = useState(false);
   const [loading, setLoading] = useState(false);
   const { signIn, isLoaded } = useSignIn();
-  const { setActive, signOut } = useClerk();
+  const { setActive } = useClerk();
   const { isSignedIn } = useClerkAuth();
-  const navigate = useNavigate();
 
-  // If already signed in, sign out first (clean slate for login page)
-  const didSignOut = useRef(false);
-  useEffect(() => {
-    if (isSignedIn && !didSignOut.current) {
-      didSignOut.current = true;
-      signOut();
-    }
-  }, [isSignedIn, signOut]);
+  // If already signed in, redirect to dashboard (no signOut!)
+  if (isSignedIn) {
+    return <Navigate to="/dashboard" replace />;
+  }
 
   const completeSignIn = async (sessionId: string) => {
     await setActive({ session: sessionId });
-    // Redirect to root — ProtectedRoute will handle role-based routing
-    window.location.href = "/";
+    window.location.href = "/dashboard";
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -47,10 +40,7 @@ const Login = () => {
       if (result.status === "complete" && result.createdSessionId) {
         await completeSignIn(result.createdSessionId);
       } else if (result.status === "needs_second_factor") {
-        // Client Trust or MFA — prepare second factor via email code
-        await signIn.prepareSecondFactor({
-          strategy: "email_code",
-        });
+        await signIn.prepareSecondFactor({ strategy: "email_code" });
         setNeedsVerification(true);
         toast({ title: "Codigo de verificacao enviado", description: "Verifique seu e-mail." });
       } else if (result.status === "needs_first_factor") {
@@ -137,7 +127,6 @@ const Login = () => {
           </div>
 
           {needsVerification ? (
-            /* Verification Code Form */
             <>
               <div className="flex items-center gap-3 mb-2">
                 <ShieldCheck className="w-6 h-6 text-primary" />
@@ -186,7 +175,6 @@ const Login = () => {
               </form>
             </>
           ) : (
-            /* Login Form */
             <>
               <h2 className="font-display text-2xl font-bold text-foreground">Entrar na plataforma</h2>
               <p className="text-muted-foreground mt-1 mb-8">Acesse seu painel de gestao</p>
