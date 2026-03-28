@@ -1,71 +1,27 @@
 const API_BASE = import.meta.env.VITE_API_URL || '';
 
-interface TokenPair {
-  accessToken: string;
-  refreshToken: string;
-}
-
 class ApiClient {
-  private tokens: TokenPair | null = null;
-  private refreshPromise: Promise<boolean> | null = null;
+  private clerkToken: string | null = null;
 
-  constructor() {
-    const stored = localStorage.getItem('auth_tokens');
-    if (stored) {
-      try {
-        this.tokens = JSON.parse(stored);
-      } catch {
-        localStorage.removeItem('auth_tokens');
-      }
-    }
-  }
-
-  setTokens(tokens: TokenPair | null): void {
-    this.tokens = tokens;
-    if (tokens) {
-      localStorage.setItem('auth_tokens', JSON.stringify(tokens));
-    } else {
-      localStorage.removeItem('auth_tokens');
-    }
+  /**
+   * Set the Clerk session token (called by AuthContext on auth state changes).
+   */
+  setClerkToken(token: string | null): void {
+    this.clerkToken = token;
   }
 
   getAccessToken(): string | null {
-    return this.tokens?.accessToken ?? null;
+    return this.clerkToken;
   }
 
   isAuthenticated(): boolean {
-    return !!this.tokens?.accessToken;
-  }
-
-  private async refreshAccessToken(): Promise<boolean> {
-    if (!this.tokens?.refreshToken) return false;
-
-    try {
-      const res = await fetch(`${API_BASE}/api/auth/refresh`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ refreshToken: this.tokens.refreshToken }),
-      });
-
-      if (!res.ok) {
-        this.setTokens(null);
-        return false;
-      }
-
-      const data = await res.json();
-      this.setTokens({ accessToken: data.accessToken, refreshToken: data.refreshToken });
-      return true;
-    } catch {
-      this.setTokens(null);
-      return false;
-    }
+    return !!this.clerkToken;
   }
 
   private async request<T>(
     method: string,
     path: string,
     body?: unknown,
-    options: { retry?: boolean } = { retry: true }
   ): Promise<T> {
     const headers: Record<string, string> = {};
 
@@ -73,8 +29,8 @@ class ApiClient {
       headers['Content-Type'] = 'application/json';
     }
 
-    if (this.tokens?.accessToken) {
-      headers['Authorization'] = `Bearer ${this.tokens.accessToken}`;
+    if (this.clerkToken) {
+      headers['Authorization'] = `Bearer ${this.clerkToken}`;
     }
 
     const res = await fetch(`${API_BASE}${path}`, {
@@ -83,20 +39,8 @@ class ApiClient {
       body: body !== undefined ? JSON.stringify(body) : undefined,
     });
 
-    // Handle 401 - try refresh
-    if (res.status === 401 && options.retry && this.tokens?.refreshToken) {
-      if (!this.refreshPromise) {
-        this.refreshPromise = this.refreshAccessToken().finally(() => {
-          this.refreshPromise = null;
-        });
-      }
-
-      const refreshed = await this.refreshPromise;
-      if (refreshed) {
-        return this.request<T>(method, path, body, { retry: false });
-      }
-
-      // Refresh failed - trigger logout
+    if (res.status === 401) {
+      // Clerk handles token refresh — if we get 401, session is truly expired
       window.dispatchEvent(new CustomEvent('auth:logout'));
       throw new Error('Sessão expirada');
     }
@@ -133,8 +77,8 @@ class ApiClient {
     formData.append('file', file);
 
     const headers: Record<string, string> = {};
-    if (this.tokens?.accessToken) {
-      headers['Authorization'] = `Bearer ${this.tokens.accessToken}`;
+    if (this.clerkToken) {
+      headers['Authorization'] = `Bearer ${this.clerkToken}`;
     }
 
     const res = await fetch(`${API_BASE}${path}`, {

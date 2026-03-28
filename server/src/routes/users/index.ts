@@ -296,7 +296,7 @@ export async function registerUserRoutes(app: FastifyInstance) {
   }, async (request, reply) => {
     const { userId } = request.params as { userId: string };
 
-    await authService.revokeAllUserTokens(userId);
+    // Clerk manages session revocation
     await query(`DELETE FROM user_roles WHERE user_id = $1`, [userId]);
     await query(`DELETE FROM profiles WHERE id = $1`, [userId]);
     await query(`DELETE FROM auth_users WHERE id = $1`, [userId]);
@@ -356,7 +356,7 @@ export async function registerUserRoutes(app: FastifyInstance) {
     preHandler: [authMiddleware, requireRole('admin')],
   }, async (request, reply) => {
     const { operatorId } = request.params as { operatorId: string };
-    await authService.revokeAllUserTokens(operatorId);
+    // Clerk manages session revocation
     await query(`DELETE FROM user_roles WHERE user_id = $1`, [operatorId]);
     await query(`DELETE FROM profiles WHERE id = $1`, [operatorId]);
     await query(`DELETE FROM auth_users WHERE id = $1`, [operatorId]);

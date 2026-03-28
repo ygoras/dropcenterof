@@ -1,86 +1,13 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { validateBody } from '../../middleware/validateBody.js';
-import { authMiddleware } from '../../middleware/auth.js';
+import { authMiddleware, clerkClient } from '../../middleware/auth.js';
 import * as authService from '../../services/authService.js';
-
-const loginSchema = z.object({
-  email: z.string().email(),
-  password: z.string().min(6),
-});
-
-const registerSchema = z.object({
-  email: z.string().email(),
-  password: z.string().min(6),
-  fullName: z.string().min(2),
-});
-
-const refreshSchema = z.object({
-  refreshToken: z.string(),
-});
+import { query, queryOne } from '../../lib/db.js';
+import { logger } from '../../lib/logger.js';
+import { env } from '../../config/env.js';
 
 export async function registerAuthRoutes(app: FastifyInstance) {
-  // Login with rate limiting
-  app.post('/api/auth/login', {
-    config: { rateLimit: { max: 5, timeWindow: '1 minute' } },
-    preHandler: [validateBody(loginSchema)],
-  }, async (request, reply) => {
-    const { email, password } = request.body as z.infer<typeof loginSchema>;
-
-    const result = await authService.login(email, password);
-    if (!result) {
-      return reply.status(401).send({ error: 'Credenciais inválidas' });
-    }
-
-    return reply.send(result);
-  });
-
-  // Register with rate limiting
-  app.post('/api/auth/register', {
-    config: { rateLimit: { max: 3, timeWindow: '1 minute' } },
-    preHandler: [validateBody(registerSchema)],
-  }, async (request, reply) => {
-    const { email, password, fullName } = request.body as z.infer<typeof registerSchema>;
-
-    try {
-      const result = await authService.register(email, password, fullName);
-      return reply.status(201).send(result);
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : '';
-      if (message.includes('duplicate key') || message.includes('unique')) {
-        return reply.status(409).send({ error: 'Email já cadastrado' });
-      }
-      throw err;
-    }
-  });
-
-  // Refresh token
-  app.post('/api/auth/refresh', {
-    config: { rateLimit: { max: 10, timeWindow: '1 minute' } },
-    preHandler: [validateBody(refreshSchema)],
-  }, async (request, reply) => {
-    const { refreshToken } = request.body as z.infer<typeof refreshSchema>;
-
-    const result = await authService.refreshTokens(refreshToken);
-    if (!result) {
-      return reply.status(401).send({ error: 'Refresh token inválido ou expirado' });
-    }
-
-    return reply.send(result);
-  });
-
-  // Logout
-  app.post('/api/auth/logout', {
-    preHandler: [authMiddleware],
-  }, async (request, reply) => {
-    const { refreshToken } = request.body as { refreshToken?: string };
-    if (refreshToken) {
-      await authService.revokeRefreshToken(refreshToken);
-    }
-    return reply.send({ success: true });
-  });
-
-  // Get current user profile
+  // Get current user profile (Clerk session → app profile)
   app.get('/api/auth/me', {
     preHandler: [authMiddleware],
   }, async (request, reply) => {
@@ -89,5 +16,65 @@ export async function registerAuthRoutes(app: FastifyInstance) {
       return reply.status(404).send({ error: 'Perfil não encontrado' });
     }
     return reply.send(profile);
+  });
+
+  // Clerk webhook — syncs user events (user.created, user.updated, user.deleted)
+  app.post('/api/webhooks/clerk', {
+    config: { rawBody: true },
+  }, async (request, reply) => {
+    const body = request.body as Record<string, unknown>;
+    const evt = body as { type?: string; data?: Record<string, unknown> };
+
+    if (!evt.type || !evt.data) {
+      return reply.status(400).send({ error: 'Invalid webhook payload' });
+    }
+
+    const { type, data } = evt;
+
+    if (type === 'user.created') {
+      const clerkUserId = data.id as string;
+      const email = (data.email_addresses as any[])?.[0]?.email_address || '';
+      const fullName = [data.first_name, data.last_name].filter(Boolean).join(' ') || email.split('@')[0];
+
+      // Check if user already exists
+      const existing = await queryOne(
+        'SELECT id FROM auth_users WHERE clerk_user_id = $1',
+        [clerkUserId]
+      );
+
+      if (!existing) {
+        try {
+          await authService.createUserFromClerk(clerkUserId, email, fullName);
+          logger.info({ clerkUserId, email }, 'Clerk user synced to app');
+        } catch (err) {
+          logger.error(err, 'Failed to sync Clerk user');
+        }
+      }
+    }
+
+    if (type === 'user.updated') {
+      const clerkUserId = data.id as string;
+      const email = (data.email_addresses as any[])?.[0]?.email_address || '';
+      const fullName = [data.first_name, data.last_name].filter(Boolean).join(' ');
+
+      await query(
+        `UPDATE profiles SET email = $1, name = COALESCE(NULLIF($2, ''), name) WHERE id = (
+          SELECT id FROM auth_users WHERE clerk_user_id = $3
+        )`,
+        [email, fullName, clerkUserId]
+      );
+    }
+
+    if (type === 'user.deleted') {
+      const clerkUserId = data.id as string;
+      await query(
+        `UPDATE profiles SET is_active = false WHERE id = (
+          SELECT id FROM auth_users WHERE clerk_user_id = $1
+        )`,
+        [clerkUserId]
+      );
+    }
+
+    return reply.send({ received: true });
   });
 }

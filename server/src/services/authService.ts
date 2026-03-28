@@ -1,191 +1,18 @@
-import bcrypt from 'bcrypt';
-import jwt from 'jsonwebtoken';
-import { env } from '../config/env.js';
 import { query, queryOne, transaction } from '../lib/db.js';
-import { sha256, generateSecureToken } from '../lib/crypto.js';
-import type { JwtPayload } from '../middleware/auth.js';
+import { clerkClient } from '../middleware/auth.js';
 
-const BCRYPT_ROUNDS = 12;
-
-interface AuthUser {
+export interface UserProfile {
   id: string;
   email: string;
-  password_hash: string;
-  email_verified: boolean;
-  user_metadata: Record<string, unknown>;
-}
-
-interface UserProfile {
-  id: string;
-  email: string;
-  full_name: string; // mapped from profiles.name column
+  full_name: string;
   tenant_id: string | null;
   roles: string[];
   subscription_status?: string;
 }
 
-export async function hashPassword(password: string): Promise<string> {
-  return bcrypt.hash(password, BCRYPT_ROUNDS);
-}
-
-export async function verifyPassword(password: string, hash: string): Promise<boolean> {
-  return bcrypt.compare(password, hash);
-}
-
-export function generateAccessToken(payload: JwtPayload): string {
-  return jwt.sign(payload as object, env.JWT_SECRET, { expiresIn: env.JWT_ACCESS_EXPIRY as any });
-}
-
-export function generateRefreshToken(): string {
-  return generateSecureToken(48);
-}
-
-export async function storeRefreshToken(userId: string, token: string, deviceInfo?: Record<string, unknown>): Promise<void> {
-  const tokenHash = sha256(token);
-  const expiresAt = new Date();
-  expiresAt.setDate(expiresAt.getDate() + 30);
-
-  await query(
-    `INSERT INTO auth_refresh_tokens (user_id, token_hash, expires_at, device_info)
-     VALUES ($1, $2, $3, $4)`,
-    [userId, tokenHash, expiresAt, JSON.stringify(deviceInfo ?? {})]
-  );
-}
-
-export async function validateRefreshToken(token: string): Promise<string | null> {
-  const tokenHash = sha256(token);
-  const result = await queryOne<{ user_id: string }>(
-    `SELECT user_id FROM auth_refresh_tokens
-     WHERE token_hash = $1 AND expires_at > NOW() AND revoked_at IS NULL`,
-    [tokenHash]
-  );
-  return result?.user_id ?? null;
-}
-
-export async function revokeRefreshToken(token: string): Promise<void> {
-  const tokenHash = sha256(token);
-  await query(
-    `UPDATE auth_refresh_tokens SET revoked_at = NOW() WHERE token_hash = $1`,
-    [tokenHash]
-  );
-}
-
-export async function revokeAllUserTokens(userId: string): Promise<void> {
-  await query(
-    `UPDATE auth_refresh_tokens SET revoked_at = NOW() WHERE user_id = $1 AND revoked_at IS NULL`,
-    [userId]
-  );
-}
-
-export async function login(email: string, password: string): Promise<{
-  accessToken: string;
-  refreshToken: string;
-  user: UserProfile;
-} | null> {
-  const user = await queryOne<AuthUser>(
-    `SELECT id, email, password_hash, email_verified, user_metadata FROM auth_users WHERE email = $1`,
-    [email.toLowerCase()]
-  );
-
-  if (!user) return null;
-
-  const valid = await verifyPassword(password, user.password_hash);
-  if (!valid) return null;
-
-  const profile = await getUserProfile(user.id);
-  if (!profile) return null;
-
-  const accessToken = generateAccessToken({
-    sub: profile.id,
-    email: profile.email,
-    roles: profile.roles,
-    tenantId: profile.tenant_id,
-  });
-
-  const refreshToken = generateRefreshToken();
-  await storeRefreshToken(user.id, refreshToken);
-
-  return { accessToken, refreshToken, user: profile };
-}
-
-export async function register(
-  email: string,
-  password: string,
-  fullName: string,
-  tenantId?: string
-): Promise<{ accessToken: string; refreshToken: string; user: UserProfile }> {
-  const passwordHash = await hashPassword(password);
-
-  return transaction(async (client) => {
-    const { rows: [authUser] } = await client.query<{ id: string }>(
-      `INSERT INTO auth_users (email, password_hash) VALUES ($1, $2) RETURNING id`,
-      [email.toLowerCase(), passwordHash]
-    );
-
-    await client.query(
-      `INSERT INTO profiles (id, email, name, tenant_id) VALUES ($1, $2, $3, $4)`,
-      [authUser.id, email.toLowerCase(), fullName, tenantId ?? null]
-    );
-
-    await client.query(
-      `INSERT INTO user_roles (user_id, role) VALUES ($1, $2)`,
-      [authUser.id, 'seller']
-    );
-
-    // Build profile inline (transaction not yet committed, pool queries can't see the data)
-    const profile: UserProfile = {
-      id: authUser.id,
-      email: email.toLowerCase(),
-      full_name: fullName,
-      tenant_id: tenantId ?? null,
-      roles: ['seller'],
-    };
-
-    const accessToken = generateAccessToken({
-      sub: profile.id,
-      email: profile.email,
-      roles: profile.roles,
-      tenantId: profile.tenant_id,
-    });
-
-    const refreshToken = generateRefreshToken();
-    const tokenHash = sha256(refreshToken);
-    const expiresAt = new Date();
-    expiresAt.setDate(expiresAt.getDate() + 30);
-    await client.query(
-      `INSERT INTO auth_refresh_tokens (user_id, token_hash, expires_at, device_info) VALUES ($1, $2, $3, '{}')`,
-      [authUser.id, tokenHash, expiresAt]
-    );
-
-    return { accessToken, refreshToken, user: profile };
-  });
-}
-
-export async function refreshTokens(oldRefreshToken: string): Promise<{
-  accessToken: string;
-  refreshToken: string;
-} | null> {
-  const userId = await validateRefreshToken(oldRefreshToken);
-  if (!userId) return null;
-
-  await revokeRefreshToken(oldRefreshToken);
-
-  const profile = await getUserProfile(userId);
-  if (!profile) return null;
-
-  const accessToken = generateAccessToken({
-    sub: profile.id,
-    email: profile.email,
-    roles: profile.roles,
-    tenantId: profile.tenant_id,
-  });
-
-  const newRefreshToken = generateRefreshToken();
-  await storeRefreshToken(userId, newRefreshToken);
-
-  return { accessToken, refreshToken: newRefreshToken };
-}
-
+/**
+ * Get user profile from the app database (not Clerk).
+ */
 export async function getUserProfile(userId: string): Promise<UserProfile | null> {
   const profile = await queryOne<{
     id: string;
@@ -219,6 +46,47 @@ export async function getUserProfile(userId: string): Promise<UserProfile | null
   };
 }
 
+/**
+ * Create app user from Clerk webhook (user.created event).
+ * Creates auth_users + profiles + user_roles with 'seller' role.
+ */
+export async function createUserFromClerk(
+  clerkUserId: string,
+  email: string,
+  fullName: string
+): Promise<UserProfile> {
+  return transaction(async (client) => {
+    const { rows: [authUser] } = await client.query<{ id: string }>(
+      `INSERT INTO auth_users (email, password_hash, clerk_user_id)
+       VALUES ($1, 'clerk_managed', $2)
+       RETURNING id`,
+      [email.toLowerCase(), clerkUserId]
+    );
+
+    await client.query(
+      `INSERT INTO profiles (id, email, name) VALUES ($1, $2, $3)`,
+      [authUser.id, email.toLowerCase(), fullName]
+    );
+
+    await client.query(
+      `INSERT INTO user_roles (user_id, role) VALUES ($1, 'seller')`,
+      [authUser.id]
+    );
+
+    return {
+      id: authUser.id,
+      email: email.toLowerCase(),
+      full_name: fullName,
+      tenant_id: null,
+      roles: ['seller'],
+    };
+  });
+}
+
+/**
+ * Create user with specific role (used by admin to create sellers/operators).
+ * Creates user in Clerk first, then syncs to app database.
+ */
 export async function createUserWithRole(
   email: string,
   password: string,
@@ -227,12 +95,20 @@ export async function createUserWithRole(
   tenantId?: string,
   phone?: string | null
 ): Promise<UserProfile> {
-  const passwordHash = await hashPassword(password);
+  // Create user in Clerk
+  const clerkUser = await clerkClient.users.createUser({
+    emailAddress: [email],
+    password,
+    firstName: fullName.split(' ')[0],
+    lastName: fullName.split(' ').slice(1).join(' ') || undefined,
+  });
 
   return transaction(async (client) => {
     const { rows: [authUser] } = await client.query<{ id: string }>(
-      `INSERT INTO auth_users (email, password_hash) VALUES ($1, $2) RETURNING id`,
-      [email.toLowerCase(), passwordHash]
+      `INSERT INTO auth_users (email, password_hash, clerk_user_id)
+       VALUES ($1, 'clerk_managed', $2)
+       RETURNING id`,
+      [email.toLowerCase(), clerkUser.id]
     );
 
     await client.query(
@@ -245,7 +121,6 @@ export async function createUserWithRole(
       [authUser.id, role]
     );
 
-    // Build profile from transaction client (data not yet committed, so pool queries can't see it)
     return {
       id: authUser.id,
       email: email.toLowerCase(),

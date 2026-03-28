@@ -3,9 +3,10 @@ import 'dotenv/config';
 
 const envSchema = z.object({
   DATABASE_URL: z.string().url(),
-  JWT_SECRET: z.string().min(32),
-  JWT_ACCESS_EXPIRY: z.string().default('15m'),
-  JWT_REFRESH_EXPIRY: z.string().default('30d'),
+  CLERK_SECRET_KEY: z.string().startsWith('sk_'),
+  CLERK_PUBLISHABLE_KEY: z.string().startsWith('pk_'),
+  // Legacy JWT — kept temporarily for migration period, can remove after full Clerk migration
+  JWT_SECRET: z.string().min(32).optional(),
   APP_URL: z.string().url(),
   APP_PORT: z.coerce.number().default(3000),
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),

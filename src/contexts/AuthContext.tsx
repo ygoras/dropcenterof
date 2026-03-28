@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useState, useCallback, ReactNode } from "react";
+import { useUser, useAuth as useClerkAuth, useClerk } from "@clerk/clerk-react";
 import { api } from "@/lib/apiClient";
 
 export interface UserProfile {
@@ -21,89 +22,69 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
+  const { isSignedIn, isLoaded: clerkLoaded, getToken } = useClerkAuth();
+  const { user: clerkUser } = useUser();
+  const clerk = useClerk();
   const [user, setUser] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
 
+  // Fetch app profile whenever Clerk auth state changes
   const fetchProfile = useCallback(async () => {
-    if (!api.isAuthenticated()) {
+    if (!clerkLoaded) return;
+
+    if (!isSignedIn) {
       setUser(null);
       setLoading(false);
       return;
     }
 
     try {
+      // Get Clerk session token for API calls
+      const token = await getToken();
+      if (token) {
+        api.setClerkToken(token);
+      }
+
       const profile = await api.get<UserProfile>("/api/auth/me");
       setUser(profile);
     } catch {
       setUser(null);
-      api.setTokens(null);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [clerkLoaded, isSignedIn, getToken]);
 
   useEffect(() => {
     fetchProfile();
-
-    // Listen for forced logout (token refresh failure)
-    const handleLogout = () => {
-      api.setTokens(null);
-      setUser(null);
-    };
-
-    window.addEventListener("auth:logout", handleLogout);
-    return () => window.removeEventListener("auth:logout", handleLogout);
   }, [fetchProfile]);
 
-  const signIn = async (email: string, password: string) => {
-    try {
-      const result = await api.post<{
-        accessToken: string;
-        refreshToken: string;
-        user: UserProfile;
-      }>("/api/auth/login", { email, password });
+  // Keep token fresh — Clerk rotates tokens automatically
+  useEffect(() => {
+    if (!isSignedIn) return;
 
-      api.setTokens({
-        accessToken: result.accessToken,
-        refreshToken: result.refreshToken,
-      });
-      setUser(result.user);
-      return { error: null };
-    } catch (err) {
-      return { error: err as Error };
-    }
+    const interval = setInterval(async () => {
+      const token = await getToken();
+      if (token) api.setClerkToken(token);
+    }, 50000); // Refresh every 50s (Clerk tokens expire in 60s)
+
+    return () => clearInterval(interval);
+  }, [isSignedIn, getToken]);
+
+  const signIn = async (_email: string, _password: string) => {
+    // Clerk handles sign-in via its own UI components (<SignIn />)
+    // This is kept for backward compatibility but shouldn't be called directly
+    return { error: new Error("Use Clerk SignIn component") };
   };
 
-  const signUp = async (email: string, password: string, fullName: string) => {
-    try {
-      const result = await api.post<{
-        accessToken: string;
-        refreshToken: string;
-        user: UserProfile;
-      }>("/api/auth/register", { email, password, fullName });
-
-      api.setTokens({
-        accessToken: result.accessToken,
-        refreshToken: result.refreshToken,
-      });
-      setUser(result.user);
-      return { error: null };
-    } catch (err) {
-      return { error: err as Error };
-    }
+  const signUp = async (_email: string, _password: string, _fullName: string) => {
+    // Clerk handles sign-up via its own UI components (<SignUp />)
+    return { error: new Error("Use Clerk SignUp component") };
   };
 
   const signOut = async () => {
-    try {
-      const stored = localStorage.getItem("auth_tokens");
-      const tokens = stored ? JSON.parse(stored) : null;
-      if (tokens?.refreshToken) {
-        await api.post("/api/auth/logout", { refreshToken: tokens.refreshToken }).catch(() => {});
-      }
-    } finally {
-      api.setTokens(null);
-      setUser(null);
-    }
+    await clerk.signOut();
+    api.setClerkToken(null);
+    setUser(null);
   };
 
   return (

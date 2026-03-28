@@ -2,6 +2,11 @@
 
 ## Security Rules (MANDATORY)
 
+### Secrets & Credentials
+- NEVER ask the user for API keys, tokens, or secrets in chat — they configure directly in .env
+- NEVER log, print, or display secret values
+- Use placeholder values like `your_clerk_secret_key` in code examples and .env.example
+
 ### Never Trust the Frontend
 - ALL input validation MUST happen server-side with Zod schemas
 - Frontend validation is UX only — the backend is the single source of truth
