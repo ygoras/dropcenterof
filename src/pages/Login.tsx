@@ -54,7 +54,8 @@ const Login = () => {
       } else if (result.status === "needs_first_factor") {
         toast({ title: "Verifique seu e-mail", description: "Um código de verificação foi enviado.", variant: "destructive" });
       } else {
-        toast({ title: "Erro no login", description: `Status: ${result.status}. Tente novamente.`, variant: "destructive" });
+        console.error('Clerk sign-in status:', result.status, JSON.stringify(result));
+        toast({ title: "Verificação adicional necessária", description: `Status: ${result.status}. Verifique configurações do Clerk.`, variant: "destructive" });
       }
     } catch (err: any) {
       const message = err?.errors?.[0]?.longMessage || err?.message || "Credenciais inválidas";
