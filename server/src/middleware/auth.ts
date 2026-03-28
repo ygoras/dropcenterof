@@ -1,7 +1,8 @@
 import type { FastifyRequest, FastifyReply } from 'fastify';
 import { createClerkClient, verifyToken } from '@clerk/backend';
 import { env } from '../config/env.js';
-import { queryOne } from '../lib/db.js';
+import { pool } from '../config/database.js';
+import { rlsStorage } from '../lib/db.js';
 
 export interface JwtPayload {
   sub: string;
@@ -22,7 +23,8 @@ export { clerkClient };
 
 /**
  * Auth middleware — verifies Clerk session token and maps to app user.
- * Maintains the same request.user interface so all routes work unchanged.
+ * Sets RLS context for all subsequent database queries in this request.
+ * Uses pool.query() directly (bypasses RLS) for auth lookups.
  */
 export async function authMiddleware(
   request: FastifyRequest,
@@ -43,8 +45,8 @@ export async function authMiddleware(
 
     const clerkUserId = payload.sub;
 
-    // Look up the app user by clerk_user_id
-    const profile = await queryOne<{
+    // Look up the app user by clerk_user_id (direct pool query, no RLS)
+    const profileResult = await pool.query<{
       id: string;
       email: string;
       tenant_id: string | null;
@@ -56,22 +58,32 @@ export async function authMiddleware(
       [clerkUserId]
     );
 
+    const profile = profileResult.rows[0];
     if (!profile) {
       return reply.status(401).send({ error: 'Usuário não encontrado no sistema' });
     }
 
-    // Get roles
-    const rolesResult = await queryOne<{ roles: string[] }>(
+    // Get roles (direct pool query, no RLS)
+    const rolesResult = await pool.query<{ roles: string[] }>(
       `SELECT ARRAY_AGG(role) as roles FROM user_roles WHERE user_id = $1`,
       [profile.id]
     );
 
+    const roles = rolesResult.rows[0]?.roles ?? [];
+    const isAdmin = roles.includes('admin') || roles.includes('manager');
+
     request.user = {
       sub: profile.id,
       email: profile.email,
-      roles: rolesResult?.roles ?? [],
+      roles,
       tenantId: profile.tenant_id,
     };
+
+    // Set RLS context for all subsequent queries in this request
+    rlsStorage.enterWith({
+      tenantId: profile.tenant_id,
+      isAdmin,
+    });
   } catch {
     return reply.status(401).send({ error: 'Token inválido ou expirado' });
   }
