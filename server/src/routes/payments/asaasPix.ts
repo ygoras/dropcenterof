@@ -463,6 +463,81 @@ export async function registerAsaasPixRoutes(app: FastifyInstance) {
       });
     }
 
+    // ─── ACTION: sync_pending_charges ─────────────────────────
+    // Checks Asaas for actual payment status of pending wallet transactions
+    // and credits the wallet if any were paid but webhook was missed.
+
+    if (action === 'sync_pending_charges') {
+      const pending = await queryMany<{
+        id: string; amount: number; reference_id: string; status: string;
+      }>(
+        `SELECT id, amount, reference_id, status FROM wallet_transactions
+         WHERE tenant_id = $1 AND status = 'pending' AND type = 'deposit'
+         ORDER BY created_at DESC`,
+        [user.tenantId]
+      );
+
+      if (pending.length === 0) {
+        return reply.send({ synced: 0, message: 'Nenhuma recarga pendente' });
+      }
+
+      let credited = 0;
+      let deleted = 0;
+      const results: { id: string; amount: number; asaas_status: string; action: string }[] = [];
+
+      for (const tx of pending) {
+        try {
+          const asaasRes = await fetch(`${ASAAS_API}/payments/${tx.reference_id}`, {
+            headers: { access_token: env.ASAAS_API_KEY },
+          });
+
+          if (!asaasRes.ok) {
+            results.push({ id: tx.reference_id, amount: tx.amount, asaas_status: 'fetch_error', action: 'skipped' });
+            continue;
+          }
+
+          const asaasData: any = await asaasRes.json();
+          const asaasStatus = asaasData.status as string;
+
+          if (asaasStatus === 'CONFIRMED' || asaasStatus === 'RECEIVED') {
+            // Payment was paid — credit wallet
+            const creditRow = await queryOne<{ credit_wallet: any }>(
+              'SELECT credit_wallet($1, $2, $3, $4, $5)',
+              [user.tenantId, tx.amount, `Recarga PIX confirmada - Asaas #${tx.reference_id}`, tx.reference_id, 'asaas_pix']
+            );
+            const creditResult = typeof creditRow?.credit_wallet === 'string'
+              ? JSON.parse(creditRow.credit_wallet)
+              : creditRow?.credit_wallet;
+
+            if (creditResult?.success) {
+              await query(
+                `UPDATE wallet_transactions SET status = 'confirmed', confirmed_at = NOW() WHERE id = $1`,
+                [tx.id]
+              );
+              credited++;
+              results.push({ id: tx.reference_id, amount: tx.amount, asaas_status: asaasStatus, action: 'credited' });
+            } else {
+              results.push({ id: tx.reference_id, amount: tx.amount, asaas_status: asaasStatus, action: 'credit_failed' });
+            }
+          } else if (asaasStatus === 'OVERDUE' || asaasStatus === 'DELETED' || asaasStatus === 'REFUNDED') {
+            // Payment expired/cancelled — mark as failed
+            await query(
+              `UPDATE wallet_transactions SET status = 'failed' WHERE id = $1`,
+              [tx.id]
+            );
+            deleted++;
+            results.push({ id: tx.reference_id, amount: tx.amount, asaas_status: asaasStatus, action: 'marked_failed' });
+          } else {
+            results.push({ id: tx.reference_id, amount: tx.amount, asaas_status: asaasStatus, action: 'still_pending' });
+          }
+        } catch (err) {
+          results.push({ id: tx.reference_id, amount: tx.amount, asaas_status: 'error', action: 'skipped' });
+        }
+      }
+
+      return reply.send({ synced: credited, cleaned: deleted, details: results });
+    }
+
     return reply.status(400).send({ error: 'Ação inválida' });
   });
 }
