@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { Boxes, Eye, EyeOff, Mail, Lock, ArrowRight, ShieldCheck } from "lucide-react";
 import { useSignIn, useClerk, useAuth as useClerkAuth } from "@clerk/clerk-react";
@@ -18,9 +18,13 @@ const Login = () => {
   const navigate = useNavigate();
 
   // If already signed in, sign out first (clean slate for login page)
-  if (isSignedIn) {
-    signOut();
-  }
+  const didSignOut = useRef(false);
+  useEffect(() => {
+    if (isSignedIn && !didSignOut.current) {
+      didSignOut.current = true;
+      signOut();
+    }
+  }, [isSignedIn, signOut]);
 
   const completeSignIn = async (sessionId: string) => {
     await setActive({ session: sessionId });
