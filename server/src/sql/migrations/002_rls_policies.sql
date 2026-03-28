@@ -23,6 +23,7 @@ $$ LANGUAGE plpgsql STABLE;
 -- Enable RLS on all tenant-scoped tables
 -- ============================================================
 
+-- Only tables with direct tenant_id column
 ALTER TABLE products ENABLE ROW LEVEL SECURITY;
 ALTER TABLE orders ENABLE ROW LEVEL SECURITY;
 ALTER TABLE wallet_transactions ENABLE ROW LEVEL SECURITY;
@@ -33,9 +34,7 @@ ALTER TABLE payments ENABLE ROW LEVEL SECURITY;
 ALTER TABLE ml_credentials ENABLE ROW LEVEL SECURITY;
 ALTER TABLE ml_listings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE shipments ENABLE ROW LEVEL SECURITY;
-ALTER TABLE picking_tasks ENABLE ROW LEVEL SECURITY;
 ALTER TABLE support_tickets ENABLE ROW LEVEL SECURITY;
-ALTER TABLE support_messages ENABLE ROW LEVEL SECURITY;
 ALTER TABLE stock ENABLE ROW LEVEL SECURITY;
 
 -- ============================================================
@@ -49,12 +48,12 @@ DO $$
 DECLARE
   tbl TEXT;
 BEGIN
+  -- Only tables that have a direct tenant_id column
   FOR tbl IN
     SELECT unnest(ARRAY[
       'products', 'orders', 'wallet_transactions', 'wallet_balances',
       'notifications', 'subscriptions', 'payments', 'ml_credentials',
-      'ml_listings', 'shipments', 'picking_tasks', 'support_tickets',
-      'support_messages', 'stock'
+      'ml_listings', 'shipments', 'support_tickets', 'stock'
     ])
   LOOP
     -- Drop existing policies if any
@@ -88,8 +87,7 @@ BEGIN
     SELECT unnest(ARRAY[
       'products', 'orders', 'wallet_transactions', 'wallet_balances',
       'notifications', 'subscriptions', 'payments', 'ml_credentials',
-      'ml_listings', 'shipments', 'picking_tasks', 'support_tickets',
-      'support_messages', 'stock'
+      'ml_listings', 'shipments', 'support_tickets', 'stock'
     ])
   LOOP
     EXECUTE format('ALTER TABLE %I FORCE ROW LEVEL SECURITY', tbl);
