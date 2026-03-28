@@ -83,8 +83,16 @@ export async function registerUserRoutes(app: FastifyInstance) {
         return reply.status(409).send({ error: 'Email já cadastrado' });
       }
       if (err?.clerkError && err?.errors?.length > 0) {
-        const clerkMsg = err.errors[0].longMessage || err.errors[0].message;
-        return reply.status(422).send({ error: clerkMsg });
+        const code = err.errors[0].code;
+        const clerkTranslations: Record<string, string> = {
+          'form_password_pwned': 'Esta senha foi encontrada em um vazamento de dados. Por segurança, use uma senha diferente.',
+          'form_password_length_too_short': 'A senha é muito curta. Use pelo menos 8 caracteres.',
+          'form_identifier_exists': 'Este e-mail já está cadastrado.',
+          'form_password_not_strong_enough': 'A senha não é forte o suficiente. Use letras, números e caracteres especiais.',
+          'form_param_format_invalid': 'Formato de e-mail inválido.',
+        };
+        const msg = clerkTranslations[code] || err.errors[0].longMessage || err.errors[0].message;
+        return reply.status(422).send({ error: msg });
       }
       throw err;
     }
