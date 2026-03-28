@@ -145,28 +145,45 @@ export async function registerAsaasWebhookRoutes(app: FastifyInstance) {
           return reply.send({ status: 'already_processed' });
         }
 
-        // Credit the wallet — PL/pgSQL returns JSONB: {success, balance, transaction_id}
-        const creditRow = await queryOne<{ credit_wallet: any }>(
-          'SELECT credit_wallet($1, $2, $3, $4, $5)',
-          [
-            tenantId,
-            amount,
-            `Recarga PIX confirmada - Asaas #${asaasPaymentId}`,
-            asaasPaymentId,
-            'asaas_pix',
-          ]
-        );
+        // Credit balance + update existing pending TX (no duplicate creation)
+        if (existingTx) {
+          // Update existing pending TX to confirmed + credit balance directly
+          const balanceRow = await queryOne<{ balance: number }>(
+            `UPDATE wallet_balances
+             SET balance = balance + $1, updated_at = NOW()
+             WHERE tenant_id = $2
+             RETURNING balance`,
+            [amount, tenantId]
+          );
 
-        const creditResult = typeof creditRow?.credit_wallet === 'string'
-          ? JSON.parse(creditRow.credit_wallet)
-          : creditRow?.credit_wallet;
+          await query(
+            `UPDATE wallet_transactions
+             SET status = 'confirmed', confirmed_at = NOW(),
+                 balance_after = $1,
+                 description = $2
+             WHERE id = $3`,
+            [balanceRow?.balance ?? null, `Recarga PIX confirmada - Asaas #${asaasPaymentId}`, existingTx.id]
+          );
 
-        if (!creditResult?.success) {
-          logger.error({ tenantId, asaasPaymentId, creditResult }, 'Credit wallet failed');
-          return reply.status(500).send({ status: 'error', reason: 'credit_wallet_failed' });
+          logger.info({ tenantId, balance: balanceRow?.balance, amount }, 'Wallet credited successfully');
+        } else {
+          // No pending TX found — use credit_wallet to create one
+          const creditRow = await queryOne<{ credit_wallet: any }>(
+            'SELECT credit_wallet($1, $2, $3, $4, $5)',
+            [tenantId, amount, `Recarga PIX confirmada - Asaas #${asaasPaymentId}`, asaasPaymentId, 'asaas_pix']
+          );
+
+          const creditResult = typeof creditRow?.credit_wallet === 'string'
+            ? JSON.parse(creditRow.credit_wallet)
+            : creditRow?.credit_wallet;
+
+          if (!creditResult?.success) {
+            logger.error({ tenantId, asaasPaymentId, creditResult }, 'Credit wallet failed');
+            return reply.status(500).send({ status: 'error', reason: 'credit_wallet_failed' });
+          }
+
+          logger.info({ tenantId, balance: creditResult.balance, amount }, 'Wallet credited successfully');
         }
-
-        logger.info({ tenantId, balance: creditResult.balance, amount }, 'Wallet credited successfully');
 
         // Notify payment confirmed
         try {
@@ -183,14 +200,6 @@ export async function registerAsaasWebhookRoutes(app: FastifyInstance) {
           );
         } catch (notifErr) {
           logger.warn(notifErr, 'Failed to create wallet recharge notification');
-        }
-
-        // Update pending transaction if exists
-        if (existingTx) {
-          await query(
-            'UPDATE wallet_transactions SET status = $1, confirmed_at = NOW() WHERE id = $2',
-            ['confirmed', existingTx.id]
-          );
         }
 
         // Process pending_credit orders queue

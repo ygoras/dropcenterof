@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   Wallet,
   Copy,
@@ -39,11 +39,37 @@ const formatDate = (date: string) => {
 };
 
 const SellerCredito = () => {
-  const { balance, transactions, forecast, loading, generating, generatePix, cancelCharge, reopenPix, refetch } = useWallet();
+  const { balance, transactions, forecast, loading, generating, generatePix, cancelCharge, reopenPix, checkChargeStatus, refetch } = useWallet();
   const [rechargeOpen, setRechargeOpen] = useState(false);
   const [rechargeAmount, setRechargeAmount] = useState("");
-  const [pixResult, setPixResult] = useState<{ pix_code: string; pix_qr_image: string; amount: number } | null>(null);
+  const [pixResult, setPixResult] = useState<{ pix_code: string; pix_qr_image: string; amount: number; reference_id?: string } | null>(null);
+  const [pixConfirmed, setPixConfirmed] = useState(false);
   const [copiedCode, setCopiedCode] = useState(false);
+  const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Poll for payment confirmation when PIX modal is open
+  useEffect(() => {
+    if (!pixResult?.reference_id) {
+      if (pollingRef.current) clearInterval(pollingRef.current);
+      return;
+    }
+
+    setPixConfirmed(false);
+
+    pollingRef.current = setInterval(async () => {
+      try {
+        const res = await checkChargeStatus(pixResult.reference_id!);
+        if (res?.status === 'confirmed') {
+          setPixConfirmed(true);
+          if (pollingRef.current) clearInterval(pollingRef.current);
+          refetch();
+          setTimeout(() => { setPixResult(null); setPixConfirmed(false); }, 4000);
+        }
+      } catch { /* ignore */ }
+    }, 5000);
+
+    return () => { if (pollingRef.current) clearInterval(pollingRef.current); };
+  }, [pixResult?.reference_id]);
 
   const handleRecharge = async () => {
     const amount = parseFloat(rechargeAmount.replace(",", "."));
@@ -54,7 +80,7 @@ const SellerCredito = () => {
     try {
       const result = await generatePix(amount);
       if (result?.pix_code) {
-        setPixResult({ pix_code: result.pix_code, pix_qr_image: result.pix_qr_image, amount });
+        setPixResult({ pix_code: result.pix_code, pix_qr_image: result.pix_qr_image, amount, reference_id: result.reference_id });
         setRechargeOpen(false);
         setRechargeAmount("");
       } else {
@@ -242,7 +268,7 @@ const SellerCredito = () => {
                   try {
                     const result = await reopenPix(refId);
                     if (result?.pix_code) {
-                      setPixResult({ pix_code: result.pix_code, pix_qr_image: result.pix_qr_image, amount: result.amount });
+                      setPixResult({ pix_code: result.pix_code, pix_qr_image: result.pix_qr_image, amount: result.amount, reference_id: refId });
                     } else {
                       toast({ title: "QR Code indisponível", description: "A cobrança pode ter expirado.", variant: "destructive" });
                     }
@@ -296,38 +322,63 @@ const SellerCredito = () => {
       </Dialog>
 
       {/* PIX Result Dialog */}
-      <Dialog open={!!pixResult} onOpenChange={() => setPixResult(null)}>
+      <Dialog open={!!pixResult} onOpenChange={() => { setPixResult(null); setPixConfirmed(false); }}>
         <DialogContent className="sm:max-w-sm">
-          <DialogHeader>
-            <DialogTitle className="font-display">PIX Gerado</DialogTitle>
-            <DialogDescription>Escaneie o QR Code ou copie o código PIX.</DialogDescription>
-          </DialogHeader>
-          {pixResult && (
-            <div className="space-y-4 mt-2 text-center">
-              <p className="text-2xl font-display font-bold text-foreground">
-                {formatCurrency(pixResult.amount)}
-              </p>
-              {pixResult.pix_qr_image && (
+          {pixConfirmed ? (
+            <>
+              <DialogHeader>
+                <DialogTitle className="font-display">Pagamento Recebido!</DialogTitle>
+                <DialogDescription>Seu saldo foi atualizado com sucesso.</DialogDescription>
+              </DialogHeader>
+              <div className="space-y-4 mt-2 text-center">
                 <div className="flex justify-center">
-                  <img
-                    src={`data:image/png;base64,${pixResult.pix_qr_image}`}
-                    alt="QR Code PIX"
-                    className="w-48 h-48 rounded-lg border border-border"
-                  />
+                  <div className="w-16 h-16 rounded-full bg-green-500/20 flex items-center justify-center">
+                    <CheckCircle2 className="w-8 h-8 text-green-500" />
+                  </div>
+                </div>
+                <p className="text-2xl font-display font-bold text-green-500">
+                  +{pixResult && formatCurrency(pixResult.amount)}
+                </p>
+                <p className="text-sm text-muted-foreground">
+                  Crédito adicionado à sua carteira.
+                </p>
+              </div>
+            </>
+          ) : (
+            <>
+              <DialogHeader>
+                <DialogTitle className="font-display">PIX Gerado</DialogTitle>
+                <DialogDescription>Escaneie o QR Code ou copie o código PIX.</DialogDescription>
+              </DialogHeader>
+              {pixResult && (
+                <div className="space-y-4 mt-2 text-center">
+                  <p className="text-2xl font-display font-bold text-foreground">
+                    {formatCurrency(pixResult.amount)}
+                  </p>
+                  {pixResult.pix_qr_image && (
+                    <div className="flex justify-center">
+                      <img
+                        src={`data:image/png;base64,${pixResult.pix_qr_image}`}
+                        alt="QR Code PIX"
+                        className="w-48 h-48 rounded-lg border border-border"
+                      />
+                    </div>
+                  )}
+                  <Button
+                    variant="outline"
+                    className="w-full gap-2"
+                    onClick={() => copyPixCode(pixResult.pix_code)}
+                  >
+                    {copiedCode ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                    {copiedCode ? "Copiado!" : "Copiar código PIX"}
+                  </Button>
+                  <div className="flex items-center justify-center gap-2 text-xs text-muted-foreground">
+                    <RefreshCw className="w-3 h-3 animate-spin" />
+                    Aguardando pagamento...
+                  </div>
                 </div>
               )}
-              <Button
-                variant="outline"
-                className="w-full gap-2"
-                onClick={() => copyPixCode(pixResult.pix_code)}
-              >
-                {copiedCode ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
-                {copiedCode ? "Copiado!" : "Copiar código PIX"}
-              </Button>
-              <p className="text-xs text-muted-foreground">
-                O saldo será atualizado automaticamente após o pagamento ser confirmado.
-              </p>
-            </div>
+            </>
           )}
         </DialogContent>
       </Dialog>

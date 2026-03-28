@@ -208,6 +208,7 @@ export async function registerAsaasPixRoutes(app: FastifyInstance) {
       return reply.send({
         success: true,
         payment_id: chargeData.id,
+        reference_id: chargeData.id,
         pix_code: pixData.payload,
         pix_qr_image: pixData.encodedImage,
         pix_expiration: pixData.expirationDate,
@@ -460,6 +461,30 @@ export async function registerAsaasPixRoutes(app: FastifyInstance) {
         monthly_forecast: Math.round(monthlyForecast * 100) / 100,
         current_balance: currentBalance,
         days_until_empty: daysUntilEmpty,
+      });
+    }
+
+    // ─── ACTION: check_charge_status ───────────────────────────
+    // Quick check if a pending charge has been confirmed (for frontend polling).
+
+    if (action === 'check_charge_status') {
+      const { reference_id } = body as any;
+      if (!reference_id) return reply.status(400).send({ error: 'reference_id é obrigatório' });
+
+      const tx = await queryOne<{ status: string }>(
+        `SELECT status FROM wallet_transactions
+         WHERE tenant_id = $1 AND reference_id = $2 AND type = 'deposit'`,
+        [user.tenantId, reference_id]
+      );
+
+      const wallet = await queryOne<{ balance: number }>(
+        'SELECT balance FROM wallet_balances WHERE tenant_id = $1',
+        [user.tenantId]
+      );
+
+      return reply.send({
+        status: tx?.status ?? 'not_found',
+        balance: wallet?.balance ?? 0,
       });
     }
 

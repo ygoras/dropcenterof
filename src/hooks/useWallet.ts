@@ -75,6 +75,13 @@ export function useWallet() {
     }
   };
 
+  const checkChargeStatus = async (referenceId: string) => {
+    return api.post<{ status: string; balance: number }>("/api/payments/pix", {
+      action: "check_charge_status",
+      reference_id: referenceId,
+    });
+  };
+
   const cancelCharge = async (referenceId: string) => {
     const data = await api.post("/api/payments/pix", { action: "cancel_charge", reference_id: referenceId });
     await fetchData();
@@ -88,5 +95,5 @@ export function useWallet() {
     );
   };
 
-  return { balance, transactions, forecast, loading, generating, generatePix, cancelCharge, reopenPix, refetch: fetchData };
+  return { balance, transactions, forecast, loading, generating, generatePix, cancelCharge, reopenPix, checkChargeStatus, refetch: fetchData };
 }
