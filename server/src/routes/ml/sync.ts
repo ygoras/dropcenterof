@@ -355,22 +355,29 @@ async function handlePublish(cred: MlCredRow, tenantId: string, listingId: strin
   }
 
   // 3. Fetch shipping cost from published item (real ML value)
-  try {
-    // Primary: use /items/{id}/shipping_options for real post-publication cost
-    const shippingRes = await fetch(`${ML_API}/items/${mlData.id}/shipping_options`, {
+  //    Uses /items/{id}/shipping_options which returns the REAL cost matching the seller panel
+  const fetchItemShippingCost = async (itemId: string): Promise<number> => {
+    const res = await fetch(`${ML_API}/items/${itemId}/shipping_options`, {
       headers: { Authorization: `Bearer ${cred.access_token}`, Accept: 'application/json' },
     });
-    if (shippingRes.ok) {
-      const shippingData: any = await shippingRes.json();
-      // Try coverage.all_country first (national cost)
-      if (shippingData?.coverage?.all_country?.list_cost) {
-        shippingCost = shippingData.coverage.all_country.list_cost;
-      }
-      // Fallback to options array
-      if (!shippingCost && shippingData?.options?.length > 0) {
-        const recommended = shippingData.options.find((o: any) => o.recommended) || shippingData.options[0];
-        shippingCost = recommended?.list_cost || recommended?.cost || 0;
-      }
+    if (!res.ok) return 0;
+    const data: any = await res.json();
+    if (data?.coverage?.all_country?.list_cost) return data.coverage.all_country.list_cost;
+    if (data?.options?.length > 0) {
+      const rec = data.options.find((o: any) => o.recommended) || data.options[0];
+      return rec?.list_cost || rec?.cost || 0;
+    }
+    return 0;
+  };
+
+  try {
+    // 1st attempt: immediate
+    shippingCost = await fetchItemShippingCost(mlData.id);
+
+    // 2nd attempt: retry after 2s if first returned 0 (ML may need time to process)
+    if (!shippingCost) {
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      shippingCost = await fetchItemShippingCost(mlData.id);
     }
 
     // Fallback: use /users/{id}/shipping_options/free with dimensions
@@ -402,6 +409,8 @@ async function handlePublish(cred: MlCredRow, tenantId: string, listingId: strin
         shippingCost = fallbackData?.coverage?.all_country?.list_cost || 0;
       }
     }
+
+    logger.info({ mlItemId: mlData.id, shippingCost, method: shippingCost ? 'items_api' : 'fallback' }, 'Shipping cost fetched after publish');
   } catch (err) {
     logger.warn({ err }, 'Could not fetch shipping cost after publish');
   }

@@ -172,6 +172,27 @@ export async function registerMlOAuthRoutes(app: FastifyInstance) {
 
       logger.info({ tenantId, mlUserId }, 'ML OAuth credentials saved');
 
+      // Register webhook subscriptions so ML sends notifications automatically
+      try {
+        const webhookUrl = env.APP_URL + '/api/webhooks/ml';
+        const webhookRes = await fetch(`https://api.mercadolibre.com/applications/${env.ML_APP_ID}/webhooks`, {
+          method: 'PUT',
+          headers: {
+            Authorization: `Bearer ${access_token}`,
+            'Content-Type': 'application/json',
+            Accept: 'application/json',
+          },
+          body: JSON.stringify({
+            callback_url: webhookUrl,
+            topics: ['items', 'orders_v2', 'shipments', 'questions'],
+          }),
+        });
+        const webhookData: any = await webhookRes.json();
+        logger.info({ status: webhookRes.status, topics: webhookData?.topics, tenantId }, 'ML webhook subscription registered');
+      } catch (webhookErr) {
+        logger.warn({ err: webhookErr, tenantId }, 'Failed to register ML webhook subscription (non-blocking)');
+      }
+
       // Return success HTML page
       const displayName = mlNickname || String(mlUserId);
       const html = buildSuccessPage(displayName, env.APP_URL);
