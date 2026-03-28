@@ -291,7 +291,7 @@ export function MlPriceCalculator({
                 <div className="flex items-center justify-between">
                   <span className="text-[10px] text-muted-foreground flex items-center gap-1">
                     <Info className="w-3 h-3" />
-                    Custo estimado do frete (API ML)
+                    Custo do frete (consultado no ML)
                   </span>
                   <span className="text-xs font-semibold text-foreground">
                     {formatCurrency(shippingCost)}
@@ -306,9 +306,9 @@ export function MlPriceCalculator({
                     {billableWeight ? ` (faturável: ${billableWeight}g)` : ""}
                   </span>
                 </div>
-                <p className="text-[10px] text-warning flex items-center gap-1">
-                  <AlertTriangle className="w-2.5 h-2.5" />
-                  Valor estimado. O custo real será definido pelo ML após publicação.
+                <p className="text-[10px] text-success flex items-center gap-1">
+                  <Info className="w-2.5 h-2.5" />
+                  Valor consultado diretamente na API do Mercado Livre com base nas dimensões e peso do produto.
                 </p>
                 <button
                   onClick={fetchShippingCost}
@@ -348,7 +348,7 @@ export function MlPriceCalculator({
         ) : (
           <div className="flex justify-between">
             <span className="text-muted-foreground">Frete</span>
-            <span className="text-info text-[10px] italic">Custo definido pelo ML após publicação</span>
+            <span className="text-info text-[10px] italic">Pago pelo comprador (calculado pelo ML)</span>
           </div>
         )}
         <div className="flex justify-between">
