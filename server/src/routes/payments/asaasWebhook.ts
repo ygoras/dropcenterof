@@ -1,6 +1,6 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { env } from '../../config/env.js';
-import { query, queryOne, queryMany } from '../../lib/db.js';
+import { query, queryOne, queryMany, transaction } from '../../lib/db.js';
 import { logger } from '../../lib/logger.js';
 
 interface AsaasWebhookBody {
@@ -143,45 +143,48 @@ export async function registerAsaasWebhookRoutes(app: FastifyInstance) {
           return reply.send({ status: 'already_processed' });
         }
 
-        // Credit balance + update existing pending TX (no duplicate creation)
-        if (existingTx) {
-          // Update existing pending TX to confirmed + credit balance directly
-          const balanceRow = await queryOne<{ balance: number }>(
-            `UPDATE wallet_balances
-             SET balance = balance + $1, updated_at = NOW()
-             WHERE tenant_id = $2
-             RETURNING balance`,
-            [amount, tenantId]
-          );
+        // Credit balance atomically via transaction (prevents race conditions)
+        const creditBalance = await transaction(async (client) => {
+          if (existingTx) {
+            // Update existing pending TX to confirmed + credit balance
+            const { rows: [bal] } = await client.query(
+              `UPDATE wallet_balances
+               SET balance = balance + $1, updated_at = NOW()
+               WHERE tenant_id = $2
+               RETURNING balance`,
+              [amount, tenantId]
+            );
 
-          await query(
-            `UPDATE wallet_transactions
-             SET status = 'confirmed', confirmed_at = NOW(),
-                 balance_after = $1,
-                 description = $2
-             WHERE id = $3`,
-            [balanceRow?.balance ?? null, `Recarga PIX confirmada - Asaas #${asaasPaymentId}`, existingTx.id]
-          );
+            await client.query(
+              `UPDATE wallet_transactions
+               SET status = 'confirmed', confirmed_at = NOW(),
+                   balance_after = $1,
+                   description = $2
+               WHERE id = $3`,
+              [bal?.balance ?? null, `Recarga PIX confirmada - Asaas #${asaasPaymentId}`, existingTx.id]
+            );
 
-          logger.info({ tenantId, balance: balanceRow?.balance, amount }, 'Wallet credited successfully');
-        } else {
-          // No pending TX found — use credit_wallet to create one
-          const creditRow = await queryOne<{ credit_wallet: any }>(
-            'SELECT credit_wallet($1, $2, $3, $4, $5)',
-            [tenantId, amount, `Recarga PIX confirmada - Asaas #${asaasPaymentId}`, asaasPaymentId, 'asaas_pix']
-          );
+            return bal?.balance ?? 0;
+          } else {
+            // No pending TX found — use credit_wallet (already atomic in PL/pgSQL)
+            const { rows: [row] } = await client.query(
+              'SELECT credit_wallet($1, $2, $3, $4, $5)',
+              [tenantId, amount, `Recarga PIX confirmada - Asaas #${asaasPaymentId}`, asaasPaymentId, 'asaas_pix']
+            );
 
-          const creditResult = typeof creditRow?.credit_wallet === 'string'
-            ? JSON.parse(creditRow.credit_wallet)
-            : creditRow?.credit_wallet;
+            const result = typeof row?.credit_wallet === 'string'
+              ? JSON.parse(row.credit_wallet)
+              : row?.credit_wallet;
 
-          if (!creditResult?.success) {
-            logger.error({ tenantId, asaasPaymentId, creditResult }, 'Credit wallet failed');
-            return reply.status(500).send({ status: 'error', reason: 'credit_wallet_failed' });
+            if (!result?.success) {
+              throw new Error('credit_wallet failed');
+            }
+
+            return result.balance;
           }
+        });
 
-          logger.info({ tenantId, balance: creditResult.balance, amount }, 'Wallet credited successfully');
-        }
+        logger.info({ tenantId, balance: creditBalance, amount }, 'Wallet credited successfully');
 
         // Notify payment confirmed
         try {

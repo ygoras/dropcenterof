@@ -1,4 +1,5 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
+import { z } from 'zod';
 import { env } from '../../config/env.js';
 import { query, queryOne, queryMany } from '../../lib/db.js';
 import { authMiddleware } from '../../middleware/auth.js';
@@ -80,20 +81,32 @@ async function getOrCreateAsaasCustomer(
 
 // ─── Route registration ────────────────────────────────────────────
 
-interface PixActionBody {
-  action: string;
-  amount?: number;
-  tenant_id?: string;
-  subscription_id?: string;
-  limit?: number;
-}
+const pixActionSchema = z.object({
+  action: z.enum([
+    'generate_pix', 'generate_plan_charge', 'get_balance', 'get_transactions',
+    'get_spending_forecast', 'check_charge_status', 'cleanup_duplicates',
+    'sync_pending_charges', 'cancel_charge', 'reopen_pix',
+  ]),
+  amount: z.number().min(1).max(50000).optional(),
+  tenant_id: z.string().uuid().optional(),
+  subscription_id: z.string().uuid().optional(),
+  reference_id: z.string().max(100).optional(),
+  limit: z.number().int().min(1).max(100).optional(),
+}).strict();
+
+type PixActionBody = z.infer<typeof pixActionSchema>;
 
 export async function registerAsaasPixRoutes(app: FastifyInstance) {
   app.post('/api/payments/pix', {
     preHandler: [authMiddleware],
-    config: { rateLimit: { max: 10, timeWindow: '1 minute' } },
+    config: { rateLimit: { max: 10, timeWindow: '1 minute', keyGenerator: (req: FastifyRequest) => req.user?.sub || req.ip } },
   }, async (request: FastifyRequest, reply: FastifyReply) => {
-    const body = request.body as PixActionBody;
+    const parsed = pixActionSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.status(400).send({ error: 'Dados inválidos', details: parsed.error.flatten().fieldErrors });
+    }
+
+    const body = parsed.data;
     const { action } = body;
     const user = request.user;
 
