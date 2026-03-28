@@ -77,10 +77,14 @@ export async function registerUserRoutes(app: FastifyInstance) {
       }
 
       return reply.status(201).send(user);
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : '';
+    } catch (err: any) {
+      const message = err?.message || '';
       if (message.includes('duplicate key') || message.includes('unique')) {
         return reply.status(409).send({ error: 'Email já cadastrado' });
+      }
+      if (err?.clerkError && err?.errors?.length > 0) {
+        const clerkMsg = err.errors[0].longMessage || err.errors[0].message;
+        return reply.status(422).send({ error: clerkMsg });
       }
       throw err;
     }
