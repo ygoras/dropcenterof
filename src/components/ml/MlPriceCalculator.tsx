@@ -64,11 +64,17 @@ export function MlPriceCalculator({
 
   const hasDimensions = productDimensions && productWeightKg && productWeightKg > 0;
 
+  const isPremium = listingType === 'gold_pro';
+
   useEffect(() => {
     if (listingType) {
       setMlCommission(String(LISTING_COMMISSIONS[listingType] || 11));
     }
-  }, [listingType]);
+    // Premium always has free shipping
+    if (isPremium) {
+      setFreeShipping(true);
+    }
+  }, [listingType, isPremium]);
 
   useEffect(() => {
     onFreeShippingChange?.(freeShipping);
@@ -231,20 +237,24 @@ export function MlPriceCalculator({
 
       {/* Free Shipping Toggle */}
       <div className="p-3 rounded-lg border border-border bg-muted/20 space-y-2">
-        <label className="flex items-center gap-2 cursor-pointer">
+        <label className={`flex items-center gap-2 ${isPremium ? 'cursor-not-allowed opacity-70' : 'cursor-pointer'}`}>
           <input
             type="checkbox"
             checked={freeShipping}
-            onChange={(e) => setFreeShipping(e.target.checked)}
+            onChange={(e) => !isPremium && setFreeShipping(e.target.checked)}
+            disabled={isPremium}
             className="w-4 h-4 rounded border-input accent-primary"
           />
           <Truck className="w-4 h-4 text-primary" />
           <span className="text-xs font-semibold text-foreground">Frete Grátis</span>
+          {isPremium && <span className="text-[10px] text-primary font-medium">(obrigatório no Premium)</span>}
         </label>
         <p className="text-[10px] text-muted-foreground">
-          {freeShipping
-            ? "O custo do frete será consultado via API do ML e embutido no preço final."
-            : "Frete pago pelo comprador. O custo real de envio será definido pelo ML após a publicação."}
+          {isPremium
+            ? "Anúncios Premium incluem frete grátis obrigatoriamente. O custo será embutido no preço final."
+            : freeShipping
+              ? "O custo do frete será consultado via API do ML e embutido no preço final."
+              : "Frete pago pelo comprador. O custo real de envio será definido pelo ML após a publicação."}
         </p>
 
         {freeShipping && !hasDimensions && (

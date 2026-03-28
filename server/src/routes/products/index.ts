@@ -89,7 +89,11 @@ export async function registerProductRoutes(app: FastifyInstance) {
 
     const products = await queryMany(
       `SELECT p.*, pc.name as category_name,
-              COALESCE(s.quantity, 0) as stock_quantity
+              COALESCE(s.quantity, 0) as stock_quantity,
+              COALESCE(s.reserved, 0) as stock_reserved,
+              COALESCE(s.quantity, 0) - COALESCE(s.reserved, 0) as stock_available,
+              COALESCE(s.min_stock, 5) as stock_min,
+              CASE WHEN (COALESCE(s.quantity, 0) - COALESCE(s.reserved, 0)) <= COALESCE(s.min_stock, 5) THEN true ELSE false END as low_stock
        FROM products p
        LEFT JOIN product_categories pc ON pc.id = p.category_id
        LEFT JOIN stock s ON s.product_id = p.id
@@ -117,7 +121,11 @@ export async function registerProductRoutes(app: FastifyInstance) {
 
     const product = await queryOne(
       `SELECT p.*, pc.name as category_name,
-              COALESCE(s.quantity, 0) as stock_quantity
+              COALESCE(s.quantity, 0) as stock_quantity,
+              COALESCE(s.reserved, 0) as stock_reserved,
+              COALESCE(s.quantity, 0) - COALESCE(s.reserved, 0) as stock_available,
+              COALESCE(s.min_stock, 5) as stock_min,
+              CASE WHEN (COALESCE(s.quantity, 0) - COALESCE(s.reserved, 0)) <= COALESCE(s.min_stock, 5) THEN true ELSE false END as low_stock
        FROM products p
        LEFT JOIN product_categories pc ON pc.id = p.category_id
        LEFT JOIN stock s ON s.product_id = p.id
