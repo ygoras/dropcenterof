@@ -28,8 +28,14 @@ export async function registerOrderRoutes(app: FastifyInstance) {
     }
 
     if (status) {
-      params.push(status);
-      conditions.push(`o.status = $${params.length}`);
+      const statuses = status.split(',').map(s => s.trim()).filter(Boolean);
+      if (statuses.length === 1) {
+        params.push(statuses[0]);
+        conditions.push(`o.status = $${params.length}`);
+      } else if (statuses.length > 1) {
+        const placeholders = statuses.map(s => { params.push(s); return `$${params.length}`; });
+        conditions.push(`o.status IN (${placeholders.join(',')})`);
+      }
     }
 
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
@@ -77,7 +83,7 @@ export async function registerOrderRoutes(app: FastifyInstance) {
     return order;
   });
 
-  // Update order status
+  // Update order status (via /status path)
   app.patch('/api/orders/:orderId/status', {
     preHandler: [authMiddleware, requireRole('admin', 'manager', 'operator'), validateBody(updateOrderStatusSchema)],
   }, async (request, reply) => {
@@ -100,5 +106,74 @@ export async function registerOrderRoutes(app: FastifyInstance) {
     );
 
     return order;
+  });
+
+  // Update order (generic PATCH - used by operator pages)
+  app.patch('/api/orders/:orderId', {
+    preHandler: [authMiddleware],
+  }, async (request, reply) => {
+    const { orderId } = request.params as { orderId: string };
+    const body = request.body as { status?: string; notes?: string; tracking_code?: string } | null;
+
+    if (!body) return reply.status(400).send({ error: 'Body vazio' });
+
+    const updates: string[] = [];
+    const values: any[] = [];
+    let idx = 1;
+
+    if (body.status) { updates.push(`status = $${idx++}`); values.push(body.status); }
+    if (body.notes) { updates.push(`notes = $${idx++}`); values.push(body.notes); }
+    if (body.tracking_code) { updates.push(`tracking_code = $${idx++}`); values.push(body.tracking_code); }
+
+    if (updates.length === 0) return reply.status(400).send({ error: 'Nada para atualizar' });
+
+    updates.push(`updated_at = NOW()`);
+    values.push(orderId);
+
+    const order = await queryOne(
+      `UPDATE orders SET ${updates.join(', ')} WHERE id = $${idx} RETURNING *`,
+      values
+    );
+
+    if (!order) return reply.status(404).send({ error: 'Pedido não encontrado' });
+    return order;
+  });
+
+  // Get order items (used by Operacao.tsx)
+  app.get('/api/order-items', {
+    preHandler: [authMiddleware],
+  }, async (request) => {
+    const { tenantId, isAdmin } = getTenantFilter(request);
+    const { order_id } = request.query as { order_id?: string };
+
+    let tenantCondition = '';
+    const params: unknown[] = [];
+
+    if (!isAdmin && tenantId) {
+      params.push(tenantId);
+      tenantCondition = `AND o.tenant_id = $${params.length}`;
+    }
+
+    if (order_id) {
+      params.push(order_id);
+      tenantCondition += ` AND o.id = $${params.length}`;
+    }
+
+    // Extract items from orders.items JSONB array and join with products
+    return queryMany(
+      `SELECT o.id as order_id, o.order_number, o.tenant_id,
+              item->>'product_id' as product_id,
+              COALESCE(item->>'sku', p.sku) as sku,
+              COALESCE(item->>'name', p.name) as product_name,
+              (item->>'quantity')::int as quantity,
+              (item->>'unit_price')::numeric as unit_price
+       FROM orders o,
+            jsonb_array_elements(o.items) as item
+       LEFT JOIN products p ON p.id = (item->>'product_id')::uuid
+       WHERE o.status NOT IN ('cancelled') ${tenantCondition}
+       ORDER BY o.created_at DESC
+       LIMIT 500`,
+      params
+    );
   });
 }

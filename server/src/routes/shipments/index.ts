@@ -93,4 +93,48 @@ export async function registerShipmentRoutes(app: FastifyInstance) {
 
     return result;
   });
+
+  // Update shipment by order ID (used by operator pages)
+  app.patch('/api/shipments/by-order/:orderId', {
+    preHandler: [authMiddleware],
+  }, async (request, reply) => {
+    const { orderId } = request.params as { orderId: string };
+    const body = request.body as {
+      status?: string;
+      tracking_code?: string;
+      carrier?: string;
+      shipped_at?: string;
+    } | null;
+
+    if (!body) {
+      return reply.status(400).send({ error: 'Body vazio' });
+    }
+
+    const updates: string[] = [];
+    const values: any[] = [];
+    let idx = 1;
+
+    if (body.status) { updates.push(`status = $${idx++}`); values.push(body.status); }
+    if (body.tracking_code) { updates.push(`tracking_code = $${idx++}`); values.push(body.tracking_code); }
+    if (body.carrier) { updates.push(`carrier = $${idx++}`); values.push(body.carrier); }
+    if (body.shipped_at) { updates.push(`shipped_at = $${idx++}`); values.push(body.shipped_at); }
+
+    if (updates.length === 0) {
+      return reply.status(400).send({ error: 'Nenhum campo para atualizar' });
+    }
+
+    updates.push(`updated_at = NOW()`);
+    values.push(orderId);
+
+    const result = await queryOne(
+      `UPDATE shipments SET ${updates.join(', ')} WHERE order_id = $${idx} RETURNING *`,
+      values
+    );
+
+    if (!result) {
+      return reply.status(404).send({ error: 'Envio não encontrado para este pedido' });
+    }
+
+    return result;
+  });
 }

@@ -674,23 +674,46 @@ async function handleShipmentNotification(credential: MlCredential, resource: st
     delivered: 'delivered',
   };
 
+  // Build label URL (always available once shipment exists)
+  const labelUrl = `${ML_API}/shipment_labels?shipment_ids=${mlShipmentId}&response_type=pdf&access_token=${credential.access_token}`;
+  const trackingCode = shipData.tracking_number || null;
+  const carrier = shipData.logistic_type || shipData.shipping_option?.name || 'Mercado Envios';
+
   const newOrderStatus = shipmentStatusMap[shipData.status];
 
   if (newOrderStatus) {
     // Update order status
     await query(
       `UPDATE orders SET status = $1, tracking_code = $2, updated_at = NOW() WHERE id = $3`,
-      [newOrderStatus, shipData.tracking_number || null, shipment.order_id]
+      [newOrderStatus, trackingCode, shipment.order_id]
     );
 
-    // Update shipment record
-    const shipUpdate = newOrderStatus === 'shipped'
-      ? `UPDATE shipments SET status = $1, tracking_code = $2, shipped_at = NOW() WHERE id = $3`
-      : `UPDATE shipments SET status = $1, tracking_code = $2 WHERE id = $3`;
+    // Update shipment record with label_url, tracking, carrier
+    if (newOrderStatus === 'shipped') {
+      await query(
+        `UPDATE shipments SET status = $1, tracking_code = $2, carrier = $3, label_url = $4, shipped_at = NOW(), updated_at = NOW() WHERE id = $5`,
+        [newOrderStatus, trackingCode, carrier, labelUrl, shipment.id]
+      );
+    } else if (newOrderStatus === 'delivered') {
+      await query(
+        `UPDATE shipments SET status = $1, tracking_code = $2, carrier = $3, label_url = $4, delivered_at = NOW(), updated_at = NOW() WHERE id = $5`,
+        [newOrderStatus, trackingCode, carrier, labelUrl, shipment.id]
+      );
+    } else {
+      await query(
+        `UPDATE shipments SET status = $1, tracking_code = $2, carrier = $3, label_url = $4, updated_at = NOW() WHERE id = $5`,
+        [newOrderStatus, trackingCode, carrier, labelUrl, shipment.id]
+      );
+    }
 
-    await query(shipUpdate, [newOrderStatus, shipData.tracking_number || null, shipment.id]);
-
-    logger.info({ mlShipmentId, orderId: shipment.order_id, newOrderStatus }, 'Shipment status updated');
+    logger.info({ mlShipmentId, orderId: shipment.order_id, newOrderStatus, hasLabel: !!labelUrl }, 'Shipment status updated');
+  } else {
+    // Even if no status change, still save label_url if we don't have one
+    await query(
+      `UPDATE shipments SET label_url = COALESCE(label_url, $1), tracking_code = COALESCE(tracking_code, $2), carrier = COALESCE(carrier, $3), updated_at = NOW() WHERE id = $4`,
+      [labelUrl, trackingCode, carrier, shipment.id]
+    );
+    logger.info({ mlShipmentId, shipDataStatus: shipData.status }, 'Shipment label_url saved (no status change)');
   }
 }
 

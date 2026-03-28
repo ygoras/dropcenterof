@@ -31,8 +31,15 @@ const Login = () => {
     try {
       const me = await api.get<{ roles: string[] }>("/api/auth/me");
       const isAdmin = me.roles?.some((r) => r === "admin" || r === "manager");
+      const isOperator = me.roles?.some((r) => r === "operator");
       setLoading(false);
-      navigate(isAdmin ? "/dashboard" : "/seller/dashboard");
+      if (isOperator) {
+        navigate("/operacao");
+      } else if (isAdmin) {
+        navigate("/dashboard");
+      } else {
+        navigate("/seller/dashboard");
+      }
     } catch {
       setLoading(false);
       navigate("/dashboard");
