@@ -185,7 +185,7 @@ export async function registerMlMiscRoutes(app: FastifyInstance) {
           let netAmount = newPrice;
           try {
             const categoryId = listing.category_id || 'MLB1000';
-            const feesUrl = `${ML_API}/sites/MLB/listing_prices?price=${newPrice}&category_id=${categoryId}&listing_type_id=${listingTypeId}&logistic_type=cross_docking&shipping_mode=me2`;
+            const feesUrl = `${ML_API}/sites/MLB/listing_prices?price=${newPrice}&category_id=${categoryId}&listing_type_id=${listingTypeId}&currency_id=BRL`;
             const feesRes = await fetch(feesUrl, {
               headers: { Authorization: `Bearer ${cred.access_token}`, Accept: 'application/json' },
             });

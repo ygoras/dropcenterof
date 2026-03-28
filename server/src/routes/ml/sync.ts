@@ -333,7 +333,7 @@ async function handlePublish(cred: MlCredRow, tenantId: string, listingId: strin
   // 2. Fetch commission using listing_prices
   try {
     const categoryId = listing.category_id || product?.ml_category_id || 'MLB1000';
-    const feesUrl = `${ML_API}/sites/MLB/listing_prices?price=${listing.price}&category_id=${categoryId}&listing_type_id=${listingTypeId}&currency_id=BRL&logistic_type=cross_docking&shipping_mode=me2`;
+    const feesUrl = `${ML_API}/sites/MLB/listing_prices?price=${listing.price}&category_id=${categoryId}&listing_type_id=${listingTypeId}&currency_id=BRL`;
     const feesRes = await fetch(feesUrl, {
       headers: { Authorization: `Bearer ${cred.access_token}`, Accept: 'application/json' },
     });
@@ -347,17 +347,34 @@ async function handlePublish(cred: MlCredRow, tenantId: string, listingId: strin
       }
     }
     if (!saleFeeAmount && listing.price > 0) {
-      const pct = listingTypeId === 'gold_pro' ? 0.17 : 0.12;
+      const pct = listingTypeId === 'gold_pro' ? 0.16 : 0.115;
       saleFeeAmount = Math.round(listing.price * pct * 100) / 100;
     }
   } catch (err) {
     logger.warn({ err }, 'Could not fetch commission after publish');
   }
 
-  // 3. Fetch shipping cost using same API as pre-publication calculator
-  //    Uses /users/{id}/shipping_options/free for consistency with MlPriceCalculator
+  // 3. Fetch shipping cost from published item (real ML value)
   try {
-    if (product?.dimensions && product?.weight_kg) {
+    // Primary: use /items/{id}/shipping_options for real post-publication cost
+    const shippingRes = await fetch(`${ML_API}/items/${mlData.id}/shipping_options`, {
+      headers: { Authorization: `Bearer ${cred.access_token}`, Accept: 'application/json' },
+    });
+    if (shippingRes.ok) {
+      const shippingData: any = await shippingRes.json();
+      // Try coverage.all_country first (national cost)
+      if (shippingData?.coverage?.all_country?.list_cost) {
+        shippingCost = shippingData.coverage.all_country.list_cost;
+      }
+      // Fallback to options array
+      if (!shippingCost && shippingData?.options?.length > 0) {
+        const recommended = shippingData.options.find((o: any) => o.recommended) || shippingData.options[0];
+        shippingCost = recommended?.list_cost || recommended?.cost || 0;
+      }
+    }
+
+    // Fallback: use /users/{id}/shipping_options/free with dimensions
+    if (!shippingCost && product?.dimensions && product?.weight_kg) {
       const dims = product.dimensions as { height?: number; width?: number; length?: number };
       const h = dims.height || 10;
       const w = dims.width || 10;
@@ -376,20 +393,13 @@ async function handlePublish(cred: MlCredRow, tenantId: string, listingId: strin
         logistic_type: 'drop_off',
       });
 
-      const shippingRes = await fetch(
+      const fallbackRes = await fetch(
         `${ML_API}/users/${cred.ml_user_id}/shipping_options/free?${shippingParams.toString()}`,
         { headers: { Authorization: `Bearer ${cred.access_token}`, Accept: 'application/json' } }
       );
-      if (shippingRes.ok) {
-        const shippingData: any = await shippingRes.json();
-        shippingCost = shippingData?.coverage?.all_country?.list_cost || 0;
-        if (!shippingCost && shippingData?.options?.length > 0) {
-          const maxOpt = shippingData.options.reduce(
-            (m: any, o: any) => ((o.list_cost || 0) > (m.list_cost || 0) ? o : m),
-            shippingData.options[0],
-          );
-          shippingCost = maxOpt?.list_cost || maxOpt?.cost || 0;
-        }
+      if (fallbackRes.ok) {
+        const fallbackData: any = await fallbackRes.json();
+        shippingCost = fallbackData?.coverage?.all_country?.list_cost || 0;
       }
     }
   } catch (err) {
@@ -474,7 +484,7 @@ async function handleUpdate(cred: MlCredRow, listingId: string, newListingTypeId
 
   try {
     const categoryId = listing.category_id || 'MLB1000';
-    const feesUrl = `${ML_API}/sites/MLB/listing_prices?price=${listing.price}&category_id=${categoryId}&listing_type_id=${listingTypeId}&currency_id=BRL&logistic_type=cross_docking&shipping_mode=me2`;
+    const feesUrl = `${ML_API}/sites/MLB/listing_prices?price=${listing.price}&category_id=${categoryId}&listing_type_id=${listingTypeId}&currency_id=BRL`;
     const feesRes = await fetch(feesUrl, {
       headers: { Authorization: `Bearer ${cred.access_token}`, Accept: 'application/json' },
     });
@@ -488,7 +498,7 @@ async function handleUpdate(cred: MlCredRow, listingId: string, newListingTypeId
       }
     }
     if (!saleFeeAmount && listing.price > 0) {
-      const pct = listingTypeId === 'gold_pro' ? 0.17 : 0.12;
+      const pct = listingTypeId === 'gold_pro' ? 0.16 : 0.115;
       saleFeeAmount = Math.round(listing.price * pct * 100) / 100;
     }
   } catch (err) {
@@ -642,7 +652,7 @@ async function handleGetFees(cred: MlCredRow, body: any, reply: any) {
   const { price, category_id, listing_type_id } = body;
   const ltId = listing_type_id || 'gold_pro';
 
-  const feesUrl = `${ML_API}/sites/MLB/listing_prices?price=${price}&category_id=${category_id || 'MLB1000'}&listing_type_id=${ltId}&currency_id=BRL&logistic_type=cross_docking&shipping_mode=me2`;
+  const feesUrl = `${ML_API}/sites/MLB/listing_prices?price=${price}&category_id=${category_id || 'MLB1000'}&listing_type_id=${ltId}&currency_id=BRL`;
 
   const feesRes = await fetch(feesUrl, {
     headers: { Authorization: `Bearer ${cred.access_token}`, Accept: 'application/json' },
@@ -671,7 +681,7 @@ async function handleGetFees(cred: MlCredRow, body: any, reply: any) {
 
   // Fallback
   if (!saleFeeAmount && price > 0) {
-    const pct = ltId === 'gold_pro' ? 0.17 : 0.12;
+    const pct = ltId === 'gold_pro' ? 0.16 : 0.115;
     saleFeeAmount = Math.round(price * pct * 100) / 100;
   }
 
@@ -705,7 +715,7 @@ async function handleRefresh(cred: MlCredRow, listingId: string, reply: any) {
   let saleFeeAmount = 0;
   try {
     const categoryId = listing.category_id || 'MLB1000';
-    const feesUrl = `${ML_API}/sites/MLB/listing_prices?price=${listing.price}&category_id=${categoryId}&listing_type_id=${ltId}&currency_id=BRL&logistic_type=cross_docking&shipping_mode=me2`;
+    const feesUrl = `${ML_API}/sites/MLB/listing_prices?price=${listing.price}&category_id=${categoryId}&listing_type_id=${ltId}&currency_id=BRL`;
     const feesRes = await fetch(feesUrl, {
       headers: { Authorization: `Bearer ${cred.access_token}`, Accept: 'application/json' },
     });
@@ -719,7 +729,7 @@ async function handleRefresh(cred: MlCredRow, listingId: string, reply: any) {
       }
     }
     if (!saleFeeAmount && listing.price > 0) {
-      const pct = ltId === 'gold_pro' ? 0.17 : 0.12;
+      const pct = ltId === 'gold_pro' ? 0.16 : 0.115;
       saleFeeAmount = Math.round(listing.price * pct * 100) / 100;
     }
   } catch (err) {

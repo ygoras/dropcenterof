@@ -34,8 +34,8 @@ const formatCurrency = (v: number) =>
   v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 
 const LISTING_COMMISSIONS: Record<string, number> = {
-  gold_pro: 17,
-  gold_special: 12,
+  gold_pro: 16,
+  gold_special: 11.5,
 };
 
 export function MlPriceCalculator({
@@ -312,9 +312,9 @@ export function MlPriceCalculator({
                     {billableWeight ? ` (faturável: ${billableWeight}g)` : ""}
                   </span>
                 </div>
-                <p className="text-[10px] text-success flex items-center gap-1">
+                <p className="text-[10px] text-info flex items-center gap-1">
                   <Info className="w-2.5 h-2.5" />
-                  Valor consultado diretamente na API do Mercado Livre com base nas dimensões e peso do produto.
+                  Valor consultado na API do ML. O valor exato pode variar levemente após publicação.
                 </p>
                 <button
                   onClick={fetchShippingCost}

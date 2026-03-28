@@ -125,7 +125,7 @@ async function handleItemNotification(credential: MlCredential, resource: string
   let saleFeeAmount = 0;
   try {
     const categoryId = listing.category_id || 'MLB1000';
-    const feesUrl = `${ML_API}/sites/MLB/listing_prices?price=${listing.price}&category_id=${categoryId}&listing_type_id=${listingTypeId}&currency_id=BRL&logistic_type=cross_docking&shipping_mode=me2`;
+    const feesUrl = `${ML_API}/sites/MLB/listing_prices?price=${listing.price}&category_id=${categoryId}&listing_type_id=${listingTypeId}&currency_id=BRL`;
     const feesRes = await fetch(feesUrl, {
       headers: { Authorization: `Bearer ${credential.access_token}`, Accept: 'application/json' },
     });
@@ -140,7 +140,7 @@ async function handleItemNotification(credential: MlCredential, resource: string
     }
     // Fallback commission
     if (!saleFeeAmount && listing.price > 0) {
-      const pct = listingTypeId === 'gold_pro' ? 0.17 : 0.12;
+      const pct = listingTypeId === 'gold_pro' ? 0.16 : 0.115;
       saleFeeAmount = Math.round(listing.price * pct * 100) / 100;
     }
   } catch (err) {
