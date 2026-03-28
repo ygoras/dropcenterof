@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Boxes, Eye, EyeOff, Mail, Lock, ArrowRight } from "lucide-react";
-import { useSignIn } from "@clerk/clerk-react";
+import { useSignIn, useClerk } from "@clerk/clerk-react";
 import { toast } from "@/hooks/use-toast";
 import { api } from "@/lib/apiClient";
 
@@ -11,6 +11,7 @@ const Login = () => {
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const { signIn, isLoaded } = useSignIn();
+  const { setActive } = useClerk();
   const navigate = useNavigate();
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -28,9 +29,12 @@ const Login = () => {
         password,
       });
 
-      if (result.status === "complete") {
-        // Wait for Clerk to set session
-        await new Promise(resolve => setTimeout(resolve, 500));
+      if (result.status === "complete" && result.createdSessionId) {
+        // Set the active session
+        await setActive({ session: result.createdSessionId });
+
+        // Small delay to let Clerk propagate the session
+        await new Promise(resolve => setTimeout(resolve, 300));
 
         // Redirect based on role
         try {
@@ -47,8 +51,10 @@ const Login = () => {
         } catch {
           navigate("/dashboard");
         }
+      } else if (result.status === "needs_first_factor") {
+        toast({ title: "Verifique seu e-mail", description: "Um código de verificação foi enviado.", variant: "destructive" });
       } else {
-        toast({ title: "Verificação adicional necessária", variant: "destructive" });
+        toast({ title: "Erro no login", description: `Status: ${result.status}. Tente novamente.`, variant: "destructive" });
       }
     } catch (err: any) {
       const message = err?.errors?.[0]?.longMessage || err?.message || "Credenciais inválidas";
