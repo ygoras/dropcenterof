@@ -140,7 +140,7 @@ async function handleItemNotification(credential: MlCredential, resource: string
     }
     // Fallback commission
     if (!saleFeeAmount && listing.price > 0) {
-      const pct = listingTypeId === 'gold_pro' ? 0.165 : 0.125;
+      const pct = listingTypeId === 'gold_pro' ? 0.165 : 0.13;
       saleFeeAmount = Math.round(listing.price * pct * 100) / 100;
     }
   } catch (err) {

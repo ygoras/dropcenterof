@@ -320,9 +320,9 @@ export function MlPriceCalculator({
                     {billableWeight ? ` (faturável: ${billableWeight}g)` : ""}
                   </span>
                 </div>
-                <p className="text-[10px] text-info flex items-center gap-1">
-                  <Info className="w-2.5 h-2.5" />
-                  Valor consultado na API do ML. O valor exato pode variar levemente após publicação.
+                <p className="text-[10px] text-warning flex items-center gap-1">
+                  <AlertTriangle className="w-2.5 h-2.5" />
+                  Estimativa pré-publicação. O valor real do frete será atualizado automaticamente após a publicação do anúncio.
                 </p>
                 <button
                   onClick={fetchShippingCost}
