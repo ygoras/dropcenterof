@@ -113,13 +113,19 @@ export function MlPriceCalculator({
     setShippingError(null);
 
     try {
+      // Calculate estimated final price (same formula used for publication)
       const markupVal = parseFloat(markup) || 0;
-      const estimatedPrice = basePrice * (1 + markupVal / 100);
+      const taxVal = parseFloat(taxPercent) || 0;
+      const mlVal = parseFloat(mlCommission) || 0;
+      const withMarkup = basePrice * (1 + markupVal / 100);
+      const withTax = withMarkup * (1 + taxVal / 100);
+      // Estimate final price without shipping first, then ML will calculate based on it
+      const estimatedFinalPrice = mlVal < 100 ? withTax / (1 - mlVal / 100) : withTax;
 
       const data = await api.post<{ error?: string; ml_error?: string; shipping_cost?: number; billable_weight?: number }>("/api/ml/shipping-cost", {
         dimensions: productDimensions,
         weight_kg: productWeightKg,
-        item_price: estimatedPrice,
+        item_price: Math.round(estimatedFinalPrice * 100) / 100,
         listing_type_id: listingType || "gold_special",
         condition: productCondition || "new",
         free_shipping: true,

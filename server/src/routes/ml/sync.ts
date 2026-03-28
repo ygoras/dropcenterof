@@ -354,24 +354,10 @@ async function handlePublish(cred: MlCredRow, tenantId: string, listingId: strin
     logger.warn({ err }, 'Could not fetch commission after publish');
   }
 
-  // 3. Fetch shipping cost
+  // 3. Fetch shipping cost using same API as pre-publication calculator
+  //    Uses /users/{id}/shipping_options/free for consistency with MlPriceCalculator
   try {
-    const shippingRes = await fetch(`${ML_API}/items/${mlData.id}/shipping_options?zip_code=01310100`, {
-      headers: { Authorization: `Bearer ${cred.access_token}`, Accept: 'application/json' },
-    });
-    if (shippingRes.ok) {
-      const shippingData: any = await shippingRes.json();
-      if (shippingData?.options?.length > 0) {
-        const recommended = shippingData.options.find((o: any) => o.recommended) || shippingData.options[0];
-        shippingCost = recommended?.list_cost || recommended?.cost || 0;
-      }
-      if (!shippingCost && shippingData?.coverage?.all_country?.list_cost) {
-        shippingCost = shippingData.coverage.all_country.list_cost;
-      }
-    }
-
-    // Fallback to user-level shipping estimate
-    if (!shippingCost && product?.dimensions && product?.weight_kg) {
+    if (product?.dimensions && product?.weight_kg) {
       const dims = product.dimensions as { height?: number; width?: number; length?: number };
       const h = dims.height || 10;
       const w = dims.width || 10;
@@ -387,19 +373,20 @@ async function handlePublish(cred: MlCredRow, tenantId: string, listingId: strin
         condition: itemCondition || 'new',
         free_shipping: String(freeShipping),
         verbose: 'true',
+        logistic_type: 'drop_off',
       });
 
-      const fallbackRes = await fetch(
+      const shippingRes = await fetch(
         `${ML_API}/users/${cred.ml_user_id}/shipping_options/free?${shippingParams.toString()}`,
         { headers: { Authorization: `Bearer ${cred.access_token}`, Accept: 'application/json' } }
       );
-      if (fallbackRes.ok) {
-        const fallbackData: any = await fallbackRes.json();
-        shippingCost = fallbackData?.coverage?.all_country?.list_cost || 0;
-        if (!shippingCost && fallbackData?.options?.length > 0) {
-          const maxOpt = fallbackData.options.reduce(
+      if (shippingRes.ok) {
+        const shippingData: any = await shippingRes.json();
+        shippingCost = shippingData?.coverage?.all_country?.list_cost || 0;
+        if (!shippingCost && shippingData?.options?.length > 0) {
+          const maxOpt = shippingData.options.reduce(
             (m: any, o: any) => ((o.list_cost || 0) > (m.list_cost || 0) ? o : m),
-            fallbackData.options[0],
+            shippingData.options[0],
           );
           shippingCost = maxOpt?.list_cost || maxOpt?.cost || 0;
         }
