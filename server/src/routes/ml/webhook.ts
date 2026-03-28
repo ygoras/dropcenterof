@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { env } from '../../config/env.js';
 import { query, queryOne, queryMany } from '../../lib/db.js';
 import { hmacSha256 } from '../../lib/crypto.js';
+import { authMiddleware } from '../../middleware/auth.js';
 import { logger } from '../../lib/logger.js';
 
 const ML_API = 'https://api.mercadolibre.com';
@@ -14,7 +15,61 @@ interface MlCredential {
   ml_user_id: string;
 }
 
+// Shared function to register webhook topics - used by OAuth, manual re-register, and token refresh
+export async function registerMlWebhookTopics(accessToken: string, tenantId: string): Promise<{ success: boolean; error?: string }> {
+  const webhookUrl = env.APP_URL + '/api/webhooks/ml';
+  try {
+    const res = await fetch(`${ML_API}/applications/${env.ML_APP_ID}/webhooks`, {
+      method: 'PUT',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      },
+      body: JSON.stringify({
+        callback_url: webhookUrl,
+        topics: ['items', 'orders_v2', 'shipments', 'questions'],
+      }),
+    });
+    const data: any = await res.json();
+    logger.info({ status: res.status, topics: data?.topics, tenantId }, 'ML webhook topics registered');
+    return { success: res.ok };
+  } catch (err) {
+    logger.warn({ err, tenantId }, 'Failed to register ML webhook topics');
+    return { success: false, error: String(err) };
+  }
+}
+
 export async function registerMlWebhookRoutes(app: FastifyInstance) {
+  // ─── Register/Re-register webhook topics (authenticated) ──────────
+  app.post('/api/ml/webhook/register', {
+    preHandler: [authMiddleware],
+  }, async (request, reply) => {
+    const tenantId = request.user.tenantId;
+    if (!tenantId) {
+      return reply.status(400).send({ error: 'Perfil sem tenant' });
+    }
+
+    const cred = await queryOne<MlCredential>(
+      `SELECT access_token, expires_at, ml_user_id FROM ml_credentials WHERE tenant_id = $1 LIMIT 1`,
+      [tenantId]
+    );
+
+    if (!cred) {
+      return reply.status(400).send({ error: 'Mercado Livre não conectado' });
+    }
+
+    if (new Date(cred.expires_at) < new Date()) {
+      return reply.status(401).send({ error: 'Token ML expirado. Reconecte sua conta.' });
+    }
+
+    const result = await registerMlWebhookTopics(cred.access_token, tenantId);
+    if (result.success) {
+      return reply.send({ success: true, message: 'Webhook topics registrados com sucesso' });
+    }
+    return reply.status(500).send({ error: 'Falha ao registrar webhook topics', detail: result.error });
+  });
+
   // ─── ML Webhook (no auth - external webhook) ───────────────────────
   app.post('/api/webhooks/ml', async (request, reply) => {
     // Optional HMAC signature verification

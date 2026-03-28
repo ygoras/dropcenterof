@@ -4,6 +4,7 @@ import { query } from '../../lib/db.js';
 import { hmacSha256, verifyHmac } from '../../lib/crypto.js';
 import { authMiddleware } from '../../middleware/auth.js';
 import { logger } from '../../lib/logger.js';
+import { registerMlWebhookTopics } from './webhook.js';
 
 const ML_AUTH_URL = 'https://auth.mercadolivre.com.br/authorization';
 const ML_TOKEN_URL = 'https://api.mercadolibre.com/oauth/token';
@@ -173,25 +174,7 @@ export async function registerMlOAuthRoutes(app: FastifyInstance) {
       logger.info({ tenantId, mlUserId }, 'ML OAuth credentials saved');
 
       // Register webhook subscriptions so ML sends notifications automatically
-      try {
-        const webhookUrl = env.APP_URL + '/api/webhooks/ml';
-        const webhookRes = await fetch(`https://api.mercadolibre.com/applications/${env.ML_APP_ID}/webhooks`, {
-          method: 'PUT',
-          headers: {
-            Authorization: `Bearer ${access_token}`,
-            'Content-Type': 'application/json',
-            Accept: 'application/json',
-          },
-          body: JSON.stringify({
-            callback_url: webhookUrl,
-            topics: ['items', 'orders_v2', 'shipments', 'questions'],
-          }),
-        });
-        const webhookData: any = await webhookRes.json();
-        logger.info({ status: webhookRes.status, topics: webhookData?.topics, tenantId }, 'ML webhook subscription registered');
-      } catch (webhookErr) {
-        logger.warn({ err: webhookErr, tenantId }, 'Failed to register ML webhook subscription (non-blocking)');
-      }
+      await registerMlWebhookTopics(access_token, tenantId);
 
       // Return success HTML page
       const displayName = mlNickname || String(mlUserId);

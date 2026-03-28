@@ -1,6 +1,7 @@
 import { env } from '../config/env.js';
 import { query, queryOne, queryMany } from '../lib/db.js';
 import { logger } from '../lib/logger.js';
+import { registerMlWebhookTopics } from '../routes/ml/webhook.js';
 
 const ML_TOKEN_URL = 'https://api.mercadolibre.com/oauth/token';
 
@@ -59,6 +60,9 @@ export async function refreshExpiringTokens(): Promise<void> {
 
       refreshed++;
       logger.info({ credId: cred.id, tenantId: cred.tenant_id }, 'ML token refreshed');
+
+      // Re-register webhook topics with fresh token to ensure notifications work
+      await registerMlWebhookTopics(tokenData.access_token, cred.tenant_id);
     } catch (err) {
       logger.error({ err, credId: cred.id }, 'Error refreshing ML credential');
     }
