@@ -137,8 +137,8 @@ export async function registerAsaasWebhookRoutes(app: FastifyInstance) {
           return reply.send({ status: 'already_processed' });
         }
 
-        // Credit the wallet
-        const creditResult = await queryOne<{ balance: number }>(
+        // Credit the wallet — PL/pgSQL returns JSONB: {success, balance, transaction_id}
+        const creditRow = await queryOne<{ credit_wallet: any }>(
           'SELECT credit_wallet($1, $2, $3, $4, $5)',
           [
             tenantId,
@@ -149,10 +149,16 @@ export async function registerAsaasWebhookRoutes(app: FastifyInstance) {
           ]
         );
 
-        if (!creditResult) {
-          logger.error({ tenantId, asaasPaymentId }, 'Credit wallet returned no result');
+        const creditResult = typeof creditRow?.credit_wallet === 'string'
+          ? JSON.parse(creditRow.credit_wallet)
+          : creditRow?.credit_wallet;
+
+        if (!creditResult?.success) {
+          logger.error({ tenantId, asaasPaymentId, creditResult }, 'Credit wallet failed');
           return reply.status(500).send({ status: 'error', reason: 'credit_wallet_failed' });
         }
+
+        logger.info({ tenantId, balance: creditResult.balance, amount }, 'Wallet credited successfully');
 
         // Notify payment confirmed
         try {
@@ -182,10 +188,14 @@ export async function registerAsaasWebhookRoutes(app: FastifyInstance) {
         // Process pending_credit orders queue
         let ordersProcessed = 0;
         try {
-          const processResult = await queryOne<{ processed: number }>(
+          const processRow = await queryOne<{ process_pending_credit_orders: any }>(
             'SELECT process_pending_credit_orders($1)',
             [tenantId]
           );
+
+          const processResult = typeof processRow?.process_pending_credit_orders === 'string'
+            ? JSON.parse(processRow.process_pending_credit_orders)
+            : processRow?.process_pending_credit_orders;
 
           ordersProcessed = processResult?.processed ?? 0;
 

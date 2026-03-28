@@ -523,11 +523,15 @@ async function handleOrderNotification(credential: MlCredential, resource: strin
     }
 
     if (totalCostPrice > 0) {
-      // Try to debit from wallet
-      const debitResult = await queryOne<{ success: boolean; reason?: string; balance?: number }>(
-        `SELECT * FROM debit_wallet($1, $2, $3, $4, $5)`,
+      // Try to debit from wallet — PL/pgSQL returns JSONB: {success, reason?, balance, transaction_id}
+      const debitRow = await queryOne<{ debit_wallet: any }>(
+        `SELECT debit_wallet($1, $2, $3, $4, $5)`,
         [credential.tenant_id, totalCostPrice, `Custo produto - ${orderNumber}`, null, 'order']
       );
+
+      const debitResult = typeof debitRow?.debit_wallet === 'string'
+        ? JSON.parse(debitRow.debit_wallet)
+        : debitRow?.debit_wallet;
 
       if (!debitResult?.success) {
         logger.info({ tenantId: credential.tenant_id, totalCostPrice }, 'Insufficient credit for order');
