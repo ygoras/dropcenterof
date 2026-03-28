@@ -91,6 +91,7 @@ interface PixActionBody {
 export async function registerAsaasPixRoutes(app: FastifyInstance) {
   app.post('/api/payments/pix', {
     preHandler: [authMiddleware],
+    config: { rateLimit: { max: 10, timeWindow: '1 minute' } },
   }, async (request: FastifyRequest, reply: FastifyReply) => {
     const body = request.body as PixActionBody;
     const { action } = body;
@@ -105,8 +106,8 @@ export async function registerAsaasPixRoutes(app: FastifyInstance) {
     if (action === 'generate_pix') {
       const { amount } = body;
 
-      if (!amount || amount <= 0) {
-        return reply.status(400).send({ error: 'Valor inválido' });
+      if (!amount || !Number.isFinite(amount) || amount < 1 || amount > 50000 || !Number.isInteger(Math.round(amount * 100))) {
+        return reply.status(400).send({ error: 'Valor inválido. Mínimo R$ 1,00, máximo R$ 50.000,00.' });
       }
 
       // Check if tenant has CPF/CNPJ (required by Asaas for PIX)
@@ -386,7 +387,9 @@ export async function registerAsaasPixRoutes(app: FastifyInstance) {
       const limit = Math.min(body.limit ?? 50, 100);
 
       const transactions = await queryMany(
-        `SELECT * FROM wallet_transactions
+        `SELECT id, tenant_id, type, amount, balance_after, status, description,
+                reference_id, reference_type, created_at, confirmed_at
+         FROM wallet_transactions
          WHERE tenant_id = $1
          ORDER BY created_at DESC
          LIMIT $2`,

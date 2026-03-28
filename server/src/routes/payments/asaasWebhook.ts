@@ -16,18 +16,16 @@ interface AsaasWebhookBody {
 
 export async function registerAsaasWebhookRoutes(app: FastifyInstance) {
   app.post('/api/payments/webhook', async (request: FastifyRequest<{ Body: AsaasWebhookBody }>, reply: FastifyReply) => {
-    // Webhook token validation
+    // Webhook token validation (timing-safe comparison)
     const incomingToken = request.headers['asaas-access-token'] as string | undefined;
-    logger.info({
-      hasToken: !!incomingToken,
-      tokenPreview: incomingToken ? incomingToken.substring(0, 8) + '...' : 'none',
-      expectedPreview: env.ASAAS_WEBHOOK_TOKEN ? env.ASAAS_WEBHOOK_TOKEN.substring(0, 8) + '...' : 'none',
-      match: incomingToken === env.ASAAS_WEBHOOK_TOKEN,
-      headers: Object.keys(request.headers).filter(h => h.includes('asaas') || h.includes('token') || h.includes('access')),
-    }, 'Asaas webhook auth debug');
 
-    if (!incomingToken || incomingToken !== env.ASAAS_WEBHOOK_TOKEN) {
-      logger.warn('Invalid or missing Asaas webhook token');
+    if (!incomingToken || !env.ASAAS_WEBHOOK_TOKEN ||
+        incomingToken.length !== env.ASAAS_WEBHOOK_TOKEN.length ||
+        !require('crypto').timingSafeEqual(
+          Buffer.from(incomingToken),
+          Buffer.from(env.ASAAS_WEBHOOK_TOKEN)
+        )) {
+      logger.warn('Webhook auth failed');
       return reply.status(401).send({ error: 'Unauthorized' });
     }
 
@@ -71,8 +69,8 @@ export async function registerAsaasWebhookRoutes(app: FastifyInstance) {
         // ── PLAN PAYMENT ──
         if (refType === 'plan') {
           const paymentRecord = await queryOne<{ id: string; status: string }>(
-            'SELECT id, status FROM payments WHERE payment_gateway_id = $1',
-            [asaasPaymentId]
+            'SELECT id, status FROM payments WHERE payment_gateway_id = $1 AND tenant_id = $2',
+            [asaasPaymentId, tenantId]
           );
 
           if (paymentRecord?.status === 'confirmed') {
@@ -133,11 +131,11 @@ export async function registerAsaasWebhookRoutes(app: FastifyInstance) {
 
         // ── WALLET RECHARGE ──
 
-        // Idempotency check
+        // Idempotency check (with tenant isolation)
         const existingTx = await queryOne<{ id: string; status: string }>(
           `SELECT id, status FROM wallet_transactions
-           WHERE reference_id = $1 AND type = 'deposit'`,
-          [asaasPaymentId]
+           WHERE reference_id = $1 AND type = 'deposit' AND tenant_id = $2`,
+          [asaasPaymentId, tenantId]
         );
 
         if (existingTx?.status === 'confirmed') {

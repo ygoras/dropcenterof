@@ -71,8 +71,8 @@ export async function registerWalletRoutes(app: FastifyInstance) {
          p.name as seller_name,
          p.email as seller_email,
          COALESCE(wb.balance, 0) as balance,
-         COALESCE((SELECT SUM(amount) FROM wallet_transactions wt WHERE wt.tenant_id = wb.tenant_id AND wt.type = 'deposit'), 0) as total_deposits,
-         COALESCE((SELECT SUM(amount) FROM wallet_transactions wt WHERE wt.tenant_id = wb.tenant_id AND wt.type = 'debit'), 0) as total_debits,
+         COALESCE((SELECT SUM(amount) FROM wallet_transactions wt WHERE wt.tenant_id = wb.tenant_id AND wt.type = 'deposit' AND wt.status = 'confirmed'), 0) as total_deposits,
+         COALESCE((SELECT SUM(amount) FROM wallet_transactions wt WHERE wt.tenant_id = wb.tenant_id AND wt.type = 'debit' AND wt.status = 'confirmed'), 0) as total_debits,
          (SELECT MAX(created_at) FROM wallet_transactions wt WHERE wt.tenant_id = wb.tenant_id) as last_transaction_at
        FROM wallet_balances wb
        JOIN tenants t ON t.id = wb.tenant_id
