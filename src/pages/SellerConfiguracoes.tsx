@@ -46,7 +46,7 @@ const SellerConfiguracoes = () => {
         }
       }).catch(() => {});
     }
-  }, [profile]);
+  }, [profile?.tenant_id]);
 
   const handleSave = async () => {
     if (!profile) return;
