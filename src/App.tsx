@@ -1,3 +1,4 @@
+import { lazy, Suspense } from "react";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -7,40 +8,49 @@ import { AuthProvider } from "@/contexts/AuthContext";
 import { ThemeProvider } from "@/components/ThemeProvider";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
 import { AppLayout } from "@/components/AppLayout";
+
+// Login loaded eagerly (first screen users see)
 import Login from "./pages/Login";
-// Registro removido — vendedores são criados pelo admin
-import Dashboard from "./pages/Dashboard";
-import Vendedores from "./pages/Vendedores";
-import Financeiro from "./pages/Financeiro";
-import Catalogo from "./pages/Catalogo";
-import Estoque from "./pages/Estoque";
-import Pedidos from "./pages/Pedidos";
-import SellerCatalogo from "./pages/SellerCatalogo";
-import SellerDashboard from "./pages/SellerDashboard";
-import SellerConfiguracoes from "./pages/SellerConfiguracoes";
-import SellerCredito from "./pages/SellerCredito";
-import SellerPlano from "./pages/SellerPlano";
-import SellerPedidos from "./pages/SellerPedidos";
-import SellerIntegracao from "./pages/SellerIntegracao";
-import SellerAnuncios from "./pages/SellerAnuncios";
-import PlaceholderPage from "./pages/PlaceholderPage";
-import AdminMercadoLivre from "./pages/AdminMercadoLivre";
-import AlertasML from "./pages/AlertasML";
-import Logistica from "./pages/Logistica";
-import OperacaoDashboard from "./pages/OperacaoDashboard";
-import OperacaoSeparacao from "./pages/OperacaoSeparacao";
-import OperacaoEmbalagem from "./pages/OperacaoEmbalagem";
-import Operadores from "./pages/Operadores";
-import Configuracoes from "./pages/Configuracoes";
-import Usuarios from "./pages/Usuarios";
-import SellerEnvio from "./pages/SellerEnvio";
-import Relatorios from "./pages/Relatorios";
-import SellerRelatorios from "./pages/SellerRelatorios";
-import Atendimento from "./pages/Atendimento";
-import SellerAtendimento from "./pages/SellerAtendimento";
-import AuditLog from "./pages/AuditLog";
-import Planos from "./pages/Planos";
-import NotFound from "./pages/NotFound";
+
+// All other pages lazy-loaded for code splitting
+const Dashboard = lazy(() => import("./pages/Dashboard"));
+const Vendedores = lazy(() => import("./pages/Vendedores"));
+const Financeiro = lazy(() => import("./pages/Financeiro"));
+const Catalogo = lazy(() => import("./pages/Catalogo"));
+const Estoque = lazy(() => import("./pages/Estoque"));
+const Pedidos = lazy(() => import("./pages/Pedidos"));
+const SellerCatalogo = lazy(() => import("./pages/SellerCatalogo"));
+const SellerDashboard = lazy(() => import("./pages/SellerDashboard"));
+const SellerConfiguracoes = lazy(() => import("./pages/SellerConfiguracoes"));
+const SellerCredito = lazy(() => import("./pages/SellerCredito"));
+const SellerPlano = lazy(() => import("./pages/SellerPlano"));
+const SellerPedidos = lazy(() => import("./pages/SellerPedidos"));
+const SellerIntegracao = lazy(() => import("./pages/SellerIntegracao"));
+const SellerAnuncios = lazy(() => import("./pages/SellerAnuncios"));
+const PlaceholderPage = lazy(() => import("./pages/PlaceholderPage"));
+const AdminMercadoLivre = lazy(() => import("./pages/AdminMercadoLivre"));
+const AlertasML = lazy(() => import("./pages/AlertasML"));
+const Logistica = lazy(() => import("./pages/Logistica"));
+const OperacaoDashboard = lazy(() => import("./pages/OperacaoDashboard"));
+const OperacaoSeparacao = lazy(() => import("./pages/OperacaoSeparacao"));
+const OperacaoEmbalagem = lazy(() => import("./pages/OperacaoEmbalagem"));
+const Operadores = lazy(() => import("./pages/Operadores"));
+const Configuracoes = lazy(() => import("./pages/Configuracoes"));
+const Usuarios = lazy(() => import("./pages/Usuarios"));
+const SellerEnvio = lazy(() => import("./pages/SellerEnvio"));
+const Relatorios = lazy(() => import("./pages/Relatorios"));
+const SellerRelatorios = lazy(() => import("./pages/SellerRelatorios"));
+const Atendimento = lazy(() => import("./pages/Atendimento"));
+const SellerAtendimento = lazy(() => import("./pages/SellerAtendimento"));
+const AuditLog = lazy(() => import("./pages/AuditLog"));
+const Planos = lazy(() => import("./pages/Planos"));
+const NotFound = lazy(() => import("./pages/NotFound"));
+
+const PageSpinner = () => (
+  <div className="min-h-screen flex items-center justify-center bg-background">
+    <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+  </div>
+);
 
 const queryClient = new QueryClient();
 
@@ -52,6 +62,7 @@ const App = () => (
         <Sonner />
         <BrowserRouter>
           <AuthProvider>
+            <Suspense fallback={<PageSpinner />}>
             <Routes>
               {/* Auth */}
               <Route path="/" element={<Navigate to="/login" replace />} />
@@ -102,6 +113,7 @@ const App = () => (
 
               <Route path="*" element={<NotFound />} />
             </Routes>
+            </Suspense>
           </AuthProvider>
         </BrowserRouter>
       </TooltipProvider>

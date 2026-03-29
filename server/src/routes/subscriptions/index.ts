@@ -54,10 +54,12 @@ export async function registerSubscriptionRoutes(app: FastifyInstance) {
     }
 
     return queryMany(
-      `SELECT s.*, t.name as tenant_name, p.name as plan_name, p.price as plan_price
+      `SELECT s.*, t.name as tenant_name, p.name as plan_name, p.price as plan_price,
+              pr.name as seller_name, pr.email as seller_email
        FROM subscriptions s
        JOIN tenants t ON t.id = s.tenant_id
        JOIN plans p ON p.id = s.plan_id
+       LEFT JOIN profiles pr ON pr.tenant_id = s.tenant_id
        ${whereClause}
        ORDER BY s.created_at DESC`,
       params

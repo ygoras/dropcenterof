@@ -8,6 +8,7 @@ import { testConnection } from './config/database.js';
 import { registerSecurityHeaders } from './middleware/securityHeaders.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import { registerSubscriptionGuard } from './middleware/subscriptionGuard.js';
+import { registerAuditLog } from './middleware/auditLog.js';
 import { logger } from './lib/logger.js';
 import { authMiddleware } from './middleware/auth.js';
 import { getTenantFilter } from './middleware/tenantScope.js';
@@ -52,6 +53,9 @@ async function start() {
 
   // Subscription guard — blocks sellers without active subscription
   registerSubscriptionGuard(app);
+
+  // Audit logging — logs sensitive operations
+  registerAuditLog(app);
 
   // Health check
   app.get('/api/health', async () => ({ status: 'ok', timestamp: new Date().toISOString() }));
