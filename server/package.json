@@ -6,7 +6,9 @@
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js",
-    "migrate": "node dist/sql/run-migrations.js"
+    "migrate": "node dist/sql/run-migrations.js",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@clerk/backend": "^3.2.3",
@@ -34,6 +36,7 @@
     "@types/node-cron": "^3.0.11",
     "@types/pg": "^8.11.14",
     "tsx": "^4.19.4",
-    "typescript": "^5.8.3"
+    "typescript": "^5.8.3",
+    "vitest": "^4.1.2"
   }
 }
