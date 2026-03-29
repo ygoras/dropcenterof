@@ -1,4 +1,5 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
+import { timingSafeEqual } from 'node:crypto';
 import { env } from '../../config/env.js';
 import { query, queryOne, queryMany, transaction } from '../../lib/db.js';
 import { logger } from '../../lib/logger.js';
@@ -21,7 +22,7 @@ export async function registerAsaasWebhookRoutes(app: FastifyInstance) {
 
     if (!incomingToken || !env.ASAAS_WEBHOOK_TOKEN ||
         incomingToken.length !== env.ASAAS_WEBHOOK_TOKEN.length ||
-        !require('crypto').timingSafeEqual(
+        !timingSafeEqual(
           Buffer.from(incomingToken),
           Buffer.from(env.ASAAS_WEBHOOK_TOKEN)
         )) {
