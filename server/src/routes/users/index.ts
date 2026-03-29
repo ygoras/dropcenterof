@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { authMiddleware } from '../../middleware/auth.js';
+import { authMiddleware, clerkClient } from '../../middleware/auth.js';
+import { logger } from '../../lib/logger.js';
 import { requireRole } from '../../middleware/rbac.js';
 import { validateBody } from '../../middleware/validateBody.js';
 import * as authService from '../../services/authService.js';
@@ -155,6 +156,39 @@ export async function registerUserRoutes(app: FastifyInstance) {
         `UPDATE tenants SET ${updates.join(', ')}, updated_at = NOW() WHERE id = $${idx}`,
         params
       );
+    }
+
+    // When deactivating: also set profile inactive + ban in Clerk
+    if (body.is_active === false) {
+      await query(`UPDATE profiles SET is_active = false WHERE id = $1`, [sellerId]);
+
+      // Ban user in Clerk (blocks login, reversible with unban)
+      try {
+        const authUser = await queryOne<{ clerk_user_id: string | null }>(
+          `SELECT clerk_user_id FROM auth_users WHERE id = $1`, [sellerId]
+        );
+        if (authUser?.clerk_user_id) {
+          await clerkClient.users.banUser(authUser.clerk_user_id);
+        }
+      } catch (err) {
+        logger.warn({ sellerId }, 'Failed to ban user in Clerk');
+      }
+    }
+
+    // When reactivating: also set profile active + unban in Clerk
+    if (body.is_active === true) {
+      await query(`UPDATE profiles SET is_active = true WHERE id = $1`, [sellerId]);
+
+      try {
+        const authUser = await queryOne<{ clerk_user_id: string | null }>(
+          `SELECT clerk_user_id FROM auth_users WHERE id = $1`, [sellerId]
+        );
+        if (authUser?.clerk_user_id) {
+          await clerkClient.users.unbanUser(authUser.clerk_user_id);
+        }
+      } catch (err) {
+        logger.warn({ sellerId }, 'Failed to unban user in Clerk');
+      }
     }
 
     return { success: true };
