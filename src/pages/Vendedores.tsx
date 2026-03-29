@@ -51,7 +51,7 @@ const Vendedores = () => {
   const { sellers, loading, createSeller, updateSeller, toggleActive, softDeleteSeller, sendPasswordReset } = useSellers();
   const { plans } = usePlans();
   const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [statusFilter, setStatusFilter] = useState<string>("active");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingSeller, setEditingSeller] = useState<SellerWithDetails | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<SellerWithDetails | null>(null);
