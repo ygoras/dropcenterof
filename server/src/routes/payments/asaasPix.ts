@@ -255,11 +255,12 @@ export async function registerAsaasPixRoutes(app: FastifyInstance) {
       );
       if (!plan) return reply.status(404).send({ error: 'Plano não encontrado' });
 
-      // Check for existing pending payment
-      const existingPayment = await queryOne<{ id: string; pix_code: string | null; pix_qr_url: string | null; payment_gateway_id: string | null }>(
-        `SELECT id, pix_code, pix_qr_url, payment_gateway_id FROM payments
-         WHERE subscription_id = $1 AND status = 'pending' ORDER BY created_at DESC LIMIT 1`,
-        [sub.id]
+      // Check for existing pending payment with matching amount
+      const existingPayment = await queryOne<{ id: string; amount: number; pix_code: string | null; pix_qr_url: string | null; payment_gateway_id: string | null }>(
+        `SELECT id, amount, pix_code, pix_qr_url, payment_gateway_id FROM payments
+         WHERE subscription_id = $1 AND status = 'pending' AND amount = $2
+         ORDER BY created_at DESC LIMIT 1`,
+        [sub.id, plan.price]
       );
 
       if (existingPayment?.pix_code) {

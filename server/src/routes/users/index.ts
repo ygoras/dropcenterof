@@ -166,6 +166,13 @@ export async function registerUserRoutes(app: FastifyInstance) {
          WHERE tenant_id = $2`,
         [body.plan_id, profile.tenant_id]
       );
+
+      // Cancel pending payments with old plan price (seller will generate new PIX)
+      await query(
+        `UPDATE payments SET status = 'expired'
+         WHERE tenant_id = $1 AND status = 'pending'`,
+        [profile.tenant_id]
+      );
     }
 
     // When deactivating: also set profile inactive + ban in Clerk
