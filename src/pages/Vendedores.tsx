@@ -54,7 +54,7 @@ const Vendedores = () => {
   const [statusFilter, setStatusFilter] = useState<string>("active");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingSeller, setEditingSeller] = useState<SellerWithDetails | null>(null);
-  const [deleteTarget, setDeleteTarget] = useState<SellerWithDetails | null>(null);
+  // deleteTarget removed — sellers are only activated/deactivated
 
   const filtered = sellers.filter((s) => {
     const matchSearch =
@@ -235,14 +235,7 @@ const Vendedores = () => {
                                 </>
                               )}
                             </DropdownMenuItem>
-                            <DropdownMenuSeparator />
-                            <DropdownMenuItem
-                              onClick={() => setDeleteTarget(seller)}
-                              className="text-destructive focus:text-destructive"
-                            >
-                              <Trash2 className="w-4 h-4 mr-2" />
-                              Excluir
-                            </DropdownMenuItem>
+                            {/* Excluir removido — vendedores são apenas ativados/desativados */}
                           </DropdownMenuContent>
                         </DropdownMenu>
                       </td>
@@ -267,28 +260,7 @@ const Vendedores = () => {
       />
 
       {/* Delete confirmation */}
-      <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Excluir vendedor?</AlertDialogTitle>
-            <AlertDialogDescription>
-              O vendedor <strong>{deleteTarget?.name}</strong> será desativado. Seus dados serão preservados para relatórios e histórico.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancelar</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={() => {
-                if (deleteTarget) softDeleteSeller(deleteTarget.id);
-                setDeleteTarget(null);
-              }}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-            >
-              Excluir
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      {/* AlertDialog de exclusão removido — vendedores são apenas ativados/desativados */}
     </div>
   );
 };
