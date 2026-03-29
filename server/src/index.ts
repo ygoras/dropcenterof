@@ -7,6 +7,7 @@ import { corsOptions } from './config/cors.js';
 import { testConnection } from './config/database.js';
 import { registerSecurityHeaders } from './middleware/securityHeaders.js';
 import { errorHandler } from './middleware/errorHandler.js';
+import { registerSubscriptionGuard } from './middleware/subscriptionGuard.js';
 import { logger } from './lib/logger.js';
 import { authMiddleware } from './middleware/auth.js';
 import { getTenantFilter } from './middleware/tenantScope.js';
@@ -48,6 +49,9 @@ async function start() {
 
   // Error handler
   app.setErrorHandler(errorHandler);
+
+  // Subscription guard — blocks sellers without active subscription
+  registerSubscriptionGuard(app);
 
   // Health check
   app.get('/api/health', async () => ({ status: 'ok', timestamp: new Date().toISOString() }));

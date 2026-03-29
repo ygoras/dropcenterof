@@ -64,6 +64,7 @@ const statusConfig: Record<string, { label: string; color: string; icon: React.E
 };
 
 const subStatusConfig: Record<string, { label: string; variant: "default" | "secondary" | "destructive" | "outline" }> = {
+  pending: { label: "Pendente", variant: "secondary" },
   active: { label: "Ativa", variant: "default" },
   overdue: { label: "Inadimplente", variant: "destructive" },
   blocked: { label: "Bloqueada", variant: "destructive" },
@@ -81,6 +82,11 @@ const SellerPlano = () => {
   const [pixDialogOpen, setPixDialogOpen] = useState(false);
   const [selectedPayment, setSelectedPayment] = useState<SellerPayment | null>(null);
   const [copiedCode, setCopiedCode] = useState(false);
+
+  // Subscription PIX state
+  const [generatingSubPix, setGeneratingSubPix] = useState(false);
+  const [subPixResult, setSubPixResult] = useState<{ pix_code: string; pix_qr_image: string | null; amount: number; reference_id: string } | null>(null);
+  const [subPixConfirmed, setSubPixConfirmed] = useState(false);
 
   // Plan change state
   const [changePlanOpen, setChangePlanOpen] = useState(false);
@@ -241,6 +247,40 @@ const SellerPlano = () => {
   const daysRemaining = COOLDOWN_DAYS - daysSinceLastRequest;
   const canRequestChange = changeRestrictionChecked && !hasPendingRequest && !isInCooldown;
 
+  const handleGenerateSubscriptionPix = async () => {
+    setGeneratingSubPix(true);
+    try {
+      const result = await api.post<any>("/api/payments/pix", { action: "generate_subscription_pix" });
+      if (result?.pix_code) {
+        setSubPixResult({
+          pix_code: result.pix_code,
+          pix_qr_image: result.pix_qr_image,
+          amount: result.amount,
+          reference_id: result.reference_id || result.payment_id,
+        });
+        // Start polling for payment confirmation
+        const interval = setInterval(async () => {
+          try {
+            const subRes = await api.get<any>(`/api/subscriptions?tenant_id=${profile?.tenant_id}`);
+            const sub = Array.isArray(subRes) ? subRes[0] : subRes;
+            if (sub?.status === 'active') {
+              clearInterval(interval);
+              setSubPixConfirmed(true);
+              fetchData();
+              setTimeout(() => { setSubPixResult(null); setSubPixConfirmed(false); window.location.reload(); }, 3000);
+            }
+          } catch { /* ignore */ }
+        }, 5000);
+      } else {
+        toast({ title: "Erro ao gerar PIX", description: result?.error || "Tente novamente", variant: "destructive" });
+      }
+    } catch (err: any) {
+      toast({ title: "Erro ao gerar cobrança", description: err.message, variant: "destructive" });
+    } finally {
+      setGeneratingSubPix(false);
+    }
+  };
+
   const getChangeBlockReason = () => {
     if (hasPendingRequest) return "Você já possui uma solicitação de alteração em análise. Aguarde o processamento.";
     if (isInCooldown) return `Você só pode solicitar nova alteração após ${daysRemaining} dia(s). Última solicitação: ${lastRequestDate?.toLocaleDateString("pt-BR")}.`;
@@ -249,6 +289,81 @@ const SellerPlano = () => {
 
   return (
     <div className="space-y-6 p-6">
+      {/* Banner de pagamento quando subscription não está ativa */}
+      {subscription && subscription.status !== 'active' && !subPixResult && (
+        <Card className="border-primary/50 bg-primary/5">
+          <CardContent className="p-6 flex items-center justify-between">
+            <div>
+              <h3 className="font-semibold text-lg text-foreground">
+                {subscription.status === 'pending' ? 'Ative sua assinatura' : 'Regularize sua assinatura'}
+              </h3>
+              <p className="text-muted-foreground text-sm mt-1">
+                {plan ? `Plano ${plan.name} — ${formatCurrency(plan.price)}/mês` : 'Gere o PIX para ativar seu acesso'}
+              </p>
+            </div>
+            <Button
+              onClick={handleGenerateSubscriptionPix}
+              disabled={generatingSubPix}
+              className="gap-2"
+            >
+              {generatingSubPix ? (
+                <RefreshCw className="w-4 h-4 animate-spin" />
+              ) : (
+                <QrCode className="w-4 h-4" />
+              )}
+              Gerar PIX
+            </Button>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* QR Code do PIX da assinatura */}
+      {subPixResult && (
+        <Card className="border-primary/50">
+          <CardContent className="p-6 text-center space-y-4">
+            {subPixConfirmed ? (
+              <>
+                <div className="flex justify-center">
+                  <div className="w-16 h-16 rounded-full bg-green-500/20 flex items-center justify-center">
+                    <CheckCircle2 className="w-8 h-8 text-green-500" />
+                  </div>
+                </div>
+                <h3 className="font-semibold text-lg text-green-500">Pagamento Recebido!</h3>
+                <p className="text-muted-foreground text-sm">Sua assinatura foi ativada.</p>
+              </>
+            ) : (
+              <>
+                <h3 className="font-semibold text-lg">Pague via PIX para ativar</h3>
+                <p className="text-2xl font-bold text-primary">{formatCurrency(subPixResult.amount)}</p>
+                {subPixResult.pix_qr_image && (
+                  <div className="flex justify-center">
+                    <img
+                      src={`data:image/png;base64,${subPixResult.pix_qr_image}`}
+                      alt="QR Code PIX"
+                      className="w-48 h-48 rounded-lg border border-border"
+                    />
+                  </div>
+                )}
+                <Button
+                  variant="outline"
+                  className="gap-2"
+                  onClick={() => {
+                    navigator.clipboard.writeText(subPixResult.pix_code);
+                    toast({ title: "Codigo PIX copiado!" });
+                  }}
+                >
+                  <Copy className="w-4 h-4" /> Copiar codigo PIX
+                </Button>
+                <div className="flex items-center justify-center gap-2 text-xs text-muted-foreground">
+                  <RefreshCw className="w-3 h-3 animate-spin" />
+                  Aguardando pagamento...
+                </div>
+              </>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Meu Plano</h1>

@@ -83,9 +83,10 @@ async function getOrCreateAsaasCustomer(
 
 const pixActionSchema = z.object({
   action: z.enum([
-    'generate_pix', 'generate_plan_charge', 'get_balance', 'get_transactions',
-    'get_spending_forecast', 'check_charge_status', 'cleanup_duplicates',
-    'sync_pending_charges', 'cancel_charge', 'reopen_pix',
+    'generate_pix', 'generate_plan_charge', 'generate_subscription_pix',
+    'get_balance', 'get_transactions', 'get_spending_forecast',
+    'check_charge_status', 'cleanup_duplicates', 'sync_pending_charges',
+    'cancel_charge', 'reopen_pix',
   ]),
   amount: z.number().min(1).max(50000).optional(),
   tenant_id: z.string().uuid().optional(),
@@ -227,6 +228,118 @@ export async function registerAsaasPixRoutes(app: FastifyInstance) {
         pix_qr_image: pixData.encodedImage,
         pix_expiration: pixData.expirationDate,
         amount,
+        status: chargeData.status,
+      });
+    }
+
+    // ─── ACTION: generate_subscription_pix (seller pays own subscription) ──
+
+    if (action === 'generate_subscription_pix') {
+      if (!user.tenantId) {
+        return reply.status(400).send({ error: 'Vendedor sem empresa associada' });
+      }
+
+      // Get seller's subscription + plan
+      const sub = await queryOne<{
+        id: string; plan_id: string; status: string; tenant_id: string;
+      }>(
+        `SELECT id, plan_id, status, tenant_id FROM subscriptions WHERE tenant_id = $1 ORDER BY created_at DESC LIMIT 1`,
+        [user.tenantId]
+      );
+
+      if (!sub) return reply.status(404).send({ error: 'Assinatura não encontrada' });
+      if (sub.status === 'active') return reply.status(400).send({ error: 'Assinatura já está ativa' });
+
+      const plan = await queryOne<{ id: string; name: string; price: number }>(
+        `SELECT id, name, price FROM plans WHERE id = $1`, [sub.plan_id]
+      );
+      if (!plan) return reply.status(404).send({ error: 'Plano não encontrado' });
+
+      // Check for existing pending payment
+      const existingPayment = await queryOne<{ id: string; pix_code: string | null; pix_qr_url: string | null; payment_gateway_id: string | null }>(
+        `SELECT id, pix_code, pix_qr_url, payment_gateway_id FROM payments
+         WHERE subscription_id = $1 AND status = 'pending' ORDER BY created_at DESC LIMIT 1`,
+        [sub.id]
+      );
+
+      if (existingPayment?.pix_code) {
+        // Return existing payment QR code
+        let pixCode = existingPayment.pix_code;
+        let pixQrUrl = existingPayment.pix_qr_url;
+        try { pixCode = decrypt(pixCode); } catch { /* plain */ }
+        try { if (pixQrUrl) pixQrUrl = decrypt(pixQrUrl); } catch { /* plain */ }
+
+        return reply.send({
+          success: true,
+          payment_id: existingPayment.payment_gateway_id,
+          reference_id: existingPayment.payment_gateway_id,
+          pix_code: pixCode,
+          pix_qr_image: pixQrUrl?.replace('data:image/png;base64,', '') || null,
+          amount: plan.price,
+          status: 'pending',
+        });
+      }
+
+      // Get or create Asaas customer
+      const tenant = await queryOne<{ id: string; name: string; document: string | null }>(
+        `SELECT id, name, document FROM tenants WHERE id = $1`, [user.tenantId]
+      );
+
+      const asaasCustomerId = await getOrCreateAsaasCustomer(
+        user.tenantId, tenant?.name || '', user.email, tenant?.document ?? undefined
+      );
+
+      // Create PIX charge in Asaas
+      const dueDate = new Date();
+      dueDate.setDate(dueDate.getDate() + 1); // 1 day to pay
+
+      const chargeRes = await fetch(`${ASAAS_API}/payments`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', access_token: env.ASAAS_API_KEY },
+        body: JSON.stringify({
+          customer: asaasCustomerId,
+          billingType: 'PIX',
+          value: plan.price,
+          dueDate: dueDate.toISOString().split('T')[0],
+          description: `Plano ${plan.name} - ${tenant?.name || 'Vendedor'}`,
+          externalReference: `plan:${user.tenantId}:${sub.id}`,
+        }),
+      });
+
+      if (!chargeRes.ok) {
+        const errText = await chargeRes.text();
+        logger.error({ tenantId: user.tenantId, error: errText }, 'Asaas subscription charge failed');
+        return reply.status(400).send({ error: 'Erro ao gerar cobrança PIX' });
+      }
+
+      const chargeData: any = await chargeRes.json();
+
+      // Get PIX QR Code
+      const pixRes = await fetch(`${ASAAS_API}/payments/${chargeData.id}/pixQrCode`, {
+        headers: { access_token: env.ASAAS_API_KEY },
+      });
+
+      let pixData: any = { encodedImage: null, payload: null };
+      if (pixRes.ok) pixData = await pixRes.json();
+
+      const encryptedPixCode = pixData.payload ? encrypt(pixData.payload) : null;
+      const encryptedPixQrUrl = pixData.encodedImage ? encrypt(`data:image/png;base64,${pixData.encodedImage}`) : null;
+
+      // Insert payment record
+      await query(
+        `INSERT INTO payments (subscription_id, tenant_id, amount, due_date, status, pix_code, pix_qr_url, payment_gateway_id)
+         VALUES ($1, $2, $3, $4, 'pending', $5, $6, $7)`,
+        [sub.id, user.tenantId, plan.price, dueDate.toISOString().split('T')[0],
+         encryptedPixCode, encryptedPixQrUrl, chargeData.id]
+      );
+
+      return reply.send({
+        success: true,
+        payment_id: chargeData.id,
+        reference_id: chargeData.id,
+        pix_code: pixData.payload,
+        pix_qr_image: pixData.encodedImage,
+        amount: plan.price,
         status: chargeData.status,
       });
     }
