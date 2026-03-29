@@ -10,6 +10,7 @@ export interface SellerWithDetails extends Profile {
   plan_price: number | null;
   subscription_status: string | null;
   billing_day: number | null;
+  current_period_end: string | null;
 }
 
 export function useSellers() {
@@ -41,7 +42,6 @@ export function useSellers() {
     company_name: string;
     company_document?: string;
     plan_id: string;
-    billing_day: number;
   }) => {
     try {
       await api.post("/api/users/sellers", {
@@ -52,7 +52,6 @@ export function useSellers() {
         company_name: data.company_name,
         company_document: data.company_document || null,
         plan_id: data.plan_id,
-        billing_day: data.billing_day,
       });
 
       toast({ title: "Vendedor criado com sucesso!", description: `Empresa "${data.company_name}" criada com plano ativo.` });

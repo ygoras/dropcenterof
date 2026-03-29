@@ -67,7 +67,7 @@ export function SellerFormDialog({
   const [companyName, setCompanyName] = useState("");
   const [companyDocument, setCompanyDocument] = useState("");
   const [planId, setPlanId] = useState("");
-  const [billingDay, setBillingDay] = useState("10");
+  // billing_day removido — sempre usa dia da criação automaticamente
   const [isActive, setIsActive] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [resettingPw, setResettingPw] = useState(false);
@@ -82,7 +82,7 @@ export function SellerFormDialog({
       setIsActive(seller.is_active);
       setPassword("");
       setPlanId(seller.plan_name ? plans.find(p => p.name === seller.plan_name)?.id ?? "" : "");
-      setBillingDay(seller.billing_day?.toString() ?? "10");
+      // billing_day definido automaticamente pelo backend
     } else {
       setName("");
       setEmail("");
@@ -91,7 +91,7 @@ export function SellerFormDialog({
       setCompanyName("");
       setCompanyDocument("");
       setPlanId("");
-      setBillingDay("10");
+      // billing_day definido automaticamente
       setIsActive(true);
     }
   }, [seller, open, plans]);
@@ -110,7 +110,7 @@ export function SellerFormDialog({
         company_name: companyName || undefined,
         company_document: companyDocument || undefined,
         plan_id: planId || undefined,
-        billing_day: billingDay ? parseInt(billingDay) : undefined,
+        // billing_day definido automaticamente pelo backend
       });
     } else {
       if (!companyName || !planId) {
@@ -125,7 +125,7 @@ export function SellerFormDialog({
         company_name: companyName,
         company_document: companyDocument || undefined,
         plan_id: planId,
-        billing_day: parseInt(billingDay),
+        // billing_day definido automaticamente pelo backend
       });
     }
 
@@ -260,21 +260,7 @@ export function SellerFormDialog({
             </div>
           )}
 
-          <div className="space-y-2">
-            <Label htmlFor="billingDay">Dia do vencimento mensal {!isEdit && "*"}</Label>
-            <Select value={billingDay} onValueChange={setBillingDay}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {[5, 10, 15, 20, 25].map((d) => (
-                  <SelectItem key={d} value={d.toString()}>
-                    Dia {d}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+          {/* billing_day removido — calculado automaticamente (dia da criação) */}
 
           {isEdit && (
             <div className="flex items-center justify-between pt-2 border-t border-border">

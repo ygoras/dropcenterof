@@ -199,7 +199,9 @@ const Vendedores = () => {
                         )}
                       </td>
                       <td className="py-3 px-4 text-muted-foreground">
-                        {seller.billing_day ? `Dia ${seller.billing_day}` : "—"}
+                        {seller.current_period_end
+                          ? new Date(seller.current_period_end).toLocaleDateString("pt-BR")
+                          : "—"}
                       </td>
                       <td className="py-3 px-4">
                         <StatusBadge

@@ -16,7 +16,7 @@ const createSellerSchema = z.object({
   phone: z.string().nullable().optional(),
   company_document: z.string().nullable().optional(),
   plan_id: z.string().uuid().optional(),
-  billing_day: z.number().min(1).max(28).optional(),
+  // billing_day removido — calculado automaticamente (dia da criação)
 });
 
 const createOperatorSchema = z.object({
@@ -254,6 +254,7 @@ export async function registerUserRoutes(app: FastifyInstance) {
               t.status as tenant_status,
               CASE WHEN t.status = 'active' THEN true ELSE false END as is_active,
               s.status as subscription_status, s.plan_id, s.billing_day,
+              s.current_period_end,
               pl.name as plan_name, pl.price as plan_price
        FROM profiles p
        JOIN user_roles ur ON ur.user_id = p.id
