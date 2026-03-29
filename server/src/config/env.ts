@@ -23,6 +23,7 @@ const envSchema = z.object({
   ASAAS_API_KEY: z.string(),
   ASAAS_WEBHOOK_TOKEN: z.string(),
   ASAAS_SANDBOX: z.string().default('true').transform(v => v === 'true'),
+  CLERK_WEBHOOK_SECRET: z.string().optional(),
   BILLING_CRON_SECRET: z.string(),
   ENCRYPTION_KEY: z.string().regex(/^[0-9a-f]{64}$/i, 'ENCRYPTION_KEY must be exactly 64 hex characters (32 bytes)'),
 });

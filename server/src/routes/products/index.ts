@@ -78,6 +78,10 @@ export async function registerProductRoutes(app: FastifyInstance) {
     preHandler: [authMiddleware],
   }, async (request) => {
     const { tenantId, isAdmin } = getTenantFilter(request);
+    const query_params = request.query as { limit?: string; offset?: string };
+    const limit = Math.min(parseInt(query_params.limit || '50', 10) || 50, 200);
+    const offset = parseInt(query_params.offset || '0', 10) || 0;
+
     const params: unknown[] = [];
     let whereClause = '';
 
@@ -86,6 +90,11 @@ export async function registerProductRoutes(app: FastifyInstance) {
       // Seller sees own products + master catalog (tenant_id IS NULL)
       whereClause = `WHERE (p.tenant_id = $${params.length} OR p.tenant_id IS NULL)`;
     }
+
+    params.push(limit);
+    const limitIdx = params.length;
+    params.push(offset);
+    const offsetIdx = params.length;
 
     const products = await queryMany(
       `SELECT p.*, pc.name as category_name,
@@ -98,7 +107,8 @@ export async function registerProductRoutes(app: FastifyInstance) {
        LEFT JOIN product_categories pc ON pc.id = p.category_id
        LEFT JOIN stock s ON s.product_id = p.id
        ${whereClause}
-       ORDER BY p.created_at DESC`
+       ORDER BY p.created_at DESC
+       LIMIT $${limitIdx} OFFSET $${offsetIdx}`
       , params
     );
     return products;

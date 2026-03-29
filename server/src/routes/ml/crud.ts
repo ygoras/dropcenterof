@@ -49,6 +49,10 @@ export async function registerMlCrudRoutes(app: FastifyInstance) {
   app.get('/api/ml/listings', {
     preHandler: [authMiddleware],
   }, async (request) => {
+    const query_params = request.query as { limit?: string; offset?: string };
+    const limit = Math.min(parseInt(query_params.limit || '50', 10) || 50, 200);
+    const offset = parseInt(query_params.offset || '0', 10) || 0;
+
     const listings = await queryMany(
       `SELECT ml.*,
               p.name AS product_name, p.sku AS product_sku, p.images AS product_images,
@@ -57,8 +61,9 @@ export async function registerMlCrudRoutes(app: FastifyInstance) {
        LEFT JOIN products p ON p.id = ml.product_id
        LEFT JOIN ml_credentials mc ON mc.id = ml.ml_credential_id
        WHERE ml.tenant_id = $1
-       ORDER BY ml.created_at DESC`,
-      [request.user.tenantId]
+       ORDER BY ml.created_at DESC
+       LIMIT $2 OFFSET $3`,
+      [request.user.tenantId, limit, offset]
     );
     return listings;
   });

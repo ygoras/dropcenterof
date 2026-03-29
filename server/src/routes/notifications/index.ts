@@ -8,13 +8,16 @@ export async function registerNotificationRoutes(app: FastifyInstance) {
     preHandler: [authMiddleware],
   }, async (request) => {
     const tenantId = request.user.tenantId;
+    const query_params = request.query as { limit?: string; offset?: string };
+    const limit = Math.min(parseInt(query_params.limit || '50', 10) || 50, 200);
+    const offset = parseInt(query_params.offset || '0', 10) || 0;
 
     return queryMany(
       `SELECT * FROM notifications
        WHERE tenant_id = $1
        ORDER BY created_at DESC
-       LIMIT 50`,
-      [tenantId]
+       LIMIT $2 OFFSET $3`,
+      [tenantId, limit, offset]
     );
   });
 

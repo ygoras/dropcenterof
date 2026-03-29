@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import { createHmac, timingSafeEqual } from 'crypto';
 import { authMiddleware, clerkClient } from '../../middleware/auth.js';
 import * as authService from '../../services/authService.js';
 import { query, queryOne } from '../../lib/db.js';
@@ -22,6 +23,59 @@ export async function registerAuthRoutes(app: FastifyInstance) {
   app.post('/api/webhooks/clerk', {
     config: { rawBody: true },
   }, async (request, reply) => {
+    // --- Signature validation using HMAC-SHA256 (Svix headers) ---
+    const webhookSecret = env.CLERK_WEBHOOK_SECRET;
+    if (webhookSecret) {
+      const svixId = request.headers['svix-id'] as string | undefined;
+      const svixTimestamp = request.headers['svix-timestamp'] as string | undefined;
+      const svixSignature = request.headers['svix-signature'] as string | undefined;
+
+      if (!svixId || !svixTimestamp || !svixSignature) {
+        logger.warn('Clerk webhook missing Svix signature headers');
+        return reply.status(401).send({ error: 'Missing webhook signature headers' });
+      }
+
+      // Reject timestamps older than 5 minutes to prevent replay attacks
+      const ts = parseInt(svixTimestamp, 10);
+      const now = Math.floor(Date.now() / 1000);
+      if (isNaN(ts) || Math.abs(now - ts) > 300) {
+        logger.warn({ svixTimestamp, now }, 'Clerk webhook timestamp out of tolerance');
+        return reply.status(401).send({ error: 'Webhook timestamp expired' });
+      }
+
+      // The secret from Clerk starts with "whsec_" — strip prefix and decode base64
+      const secretBytes = Buffer.from(
+        webhookSecret.startsWith('whsec_') ? webhookSecret.slice(6) : webhookSecret,
+        'base64'
+      );
+
+      // Svix signing payload: "{msg_id}.{timestamp}.{body}"
+      const rawBody = (request as any).rawBody || JSON.stringify(request.body);
+      const signPayload = `${svixId}.${svixTimestamp}.${rawBody}`;
+      const expectedSig = createHmac('sha256', secretBytes)
+        .update(signPayload)
+        .digest('base64');
+
+      // svix-signature may contain multiple sigs separated by spaces: "v1,<sig1> v1,<sig2>"
+      const sigCandidates = svixSignature.split(' ').map(s => s.replace(/^v1,/, ''));
+      const isValid = sigCandidates.some((candidate) => {
+        try {
+          const candidateBuf = Buffer.from(candidate, 'base64');
+          const expectedBuf = Buffer.from(expectedSig, 'base64');
+          return candidateBuf.length === expectedBuf.length && timingSafeEqual(candidateBuf, expectedBuf);
+        } catch {
+          return false;
+        }
+      });
+
+      if (!isValid) {
+        logger.warn({ svixId }, 'Clerk webhook signature validation failed');
+        return reply.status(401).send({ error: 'Invalid webhook signature' });
+      }
+    } else {
+      logger.warn('CLERK_WEBHOOK_SECRET not set — skipping webhook signature validation');
+    }
+
     const body = request.body as Record<string, unknown>;
     const evt = body as { type?: string; data?: Record<string, unknown> };
 
@@ -57,22 +111,30 @@ export async function registerAuthRoutes(app: FastifyInstance) {
       const email = (data.email_addresses as any[])?.[0]?.email_address || '';
       const fullName = [data.first_name, data.last_name].filter(Boolean).join(' ');
 
-      await query(
-        `UPDATE profiles SET email = $1, name = COALESCE(NULLIF($2, ''), name) WHERE id = (
-          SELECT id FROM auth_users WHERE clerk_user_id = $3
-        )`,
-        [email, fullName, clerkUserId]
-      );
+      try {
+        await query(
+          `UPDATE profiles SET email = $1, name = COALESCE(NULLIF($2, ''), name) WHERE id = (
+            SELECT id FROM auth_users WHERE clerk_user_id = $3
+          )`,
+          [email, fullName, clerkUserId]
+        );
+      } catch (err) {
+        logger.error(err, 'Failed to update profile from Clerk webhook');
+      }
     }
 
     if (type === 'user.deleted') {
       const clerkUserId = data.id as string;
-      await query(
-        `UPDATE profiles SET is_active = false WHERE id = (
-          SELECT id FROM auth_users WHERE clerk_user_id = $1
-        )`,
-        [clerkUserId]
-      );
+      try {
+        await query(
+          `UPDATE profiles SET is_active = false WHERE id = (
+            SELECT id FROM auth_users WHERE clerk_user_id = $1
+          )`,
+          [clerkUserId]
+        );
+      } catch (err) {
+        logger.error(err, 'Failed to deactivate profile from Clerk webhook');
+      }
     }
 
     return reply.send({ received: true });

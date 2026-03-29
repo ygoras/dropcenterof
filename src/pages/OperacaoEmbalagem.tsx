@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { BoxesIcon, RefreshCw, ArrowLeft, ScanBarcode, Timer, CheckCircle2, Package, AlertCircle, Truck } from "lucide-react";
+import { BoxesIcon, RefreshCw, ScanBarcode, Timer, CheckCircle2, Package, AlertCircle, Truck } from "lucide-react";
 import { api } from "@/lib/apiClient";
 import { useSSE } from "@/hooks/useSSE";
 import { useAuth } from "@/contexts/AuthContext";
@@ -178,10 +178,12 @@ const OperacaoEmbalagem = () => {
     <div className="space-y-4 sm:space-y-6 max-w-[1200px] mx-auto animate-fade-in">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <Link to="/operacao" className="h-10 w-10 rounded-lg border border-border bg-card flex items-center justify-center hover:bg-secondary/50 transition-colors">
-            <ArrowLeft className="w-4 h-4" />
-          </Link>
+        <div className="flex flex-col gap-2">
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Link to="/operacao" className="hover:text-foreground transition-colors">Operação</Link>
+            <span>/</span>
+            <span className="text-foreground font-medium">Embalagem</span>
+          </div>
           <div>
             <h1 className="font-display text-2xl font-bold text-foreground flex items-center gap-2">
               <BoxesIcon className="w-6 h-6 text-warning" />
