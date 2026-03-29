@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { formatCurrency } from "@/lib/formatters";
 import {
   Tag,
   Search,
@@ -66,7 +67,6 @@ const Catalogo = () => {
     lowStock: products.filter((p) => p.low_stock && p.status === "active").length,
   };
 
-  const formatCurrency = (v: number) => v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 
   return (
     <div className="space-y-6 max-w-[1400px]">

@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { api } from "@/lib/apiClient";
 import { toast } from "@/hooks/use-toast";
+import { useSSE } from "@/hooks/useSSE";
 import type { Product, ProductCategory, ProductWithStock, ProductStatus } from "@/types/catalog";
 
 async function logAudit(action: string, entity_type: string, entity_id?: string, details?: Record<string, unknown>) {
@@ -42,6 +43,11 @@ export function useProducts() {
     fetchProducts();
     fetchCategories();
   }, [fetchProducts, fetchCategories]);
+
+  // Realtime: auto-refresh when products or stock change via SSE
+  useSSE(["products", "stock_movements"], () => {
+    fetchProducts();
+  });
 
   const createProduct = async (data: {
     sku: string;

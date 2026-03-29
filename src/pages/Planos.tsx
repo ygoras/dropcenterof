@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { formatCurrency, formatDate } from "@/lib/formatters";
 import {
   CreditCard,
   Search,
@@ -218,8 +219,6 @@ const Planos = () => {
     blocked: new Set(payments.filter((p) => p.subscription_status === "blocked").map((p) => p.tenant_id)).size,
   };
 
-  const formatCurrency = (value: number) =>
-    value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 
   return (
     <div className="space-y-6 max-w-[1400px]">
@@ -494,7 +493,7 @@ const Planos = () => {
                           </td>
                           <td className="py-3 px-4">
                             <span className={`text-sm ${isOverdue ? "text-destructive font-semibold" : "text-muted-foreground"}`}>
-                              {new Date(payment.due_date + "T00:00:00").toLocaleDateString("pt-BR")}
+                              {formatDate(payment.due_date)}
                             </span>
                             {isOverdue && (
                               <span className="block text-[10px] text-destructive font-medium">VENCIDO</span>
@@ -882,7 +881,7 @@ const Planos = () => {
                 {formatCurrency(chargeResult.amount)}
               </p>
               <p className="text-sm text-muted-foreground">
-                Vencimento: {new Date(chargeResult.due_date + "T00:00:00").toLocaleDateString("pt-BR")}
+                Vencimento: {formatDate(chargeResult.due_date)}
               </p>
               {chargeResult.pix_qr_image && (
                 <div className="flex justify-center">

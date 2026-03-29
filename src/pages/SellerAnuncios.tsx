@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { formatCurrency } from "@/lib/formatters";
 import {
   ClipboardList,
   Plus,
@@ -72,8 +73,6 @@ const SellerAnuncios = () => {
     return matchSearch && matchStore;
   });
 
-  const formatCurrency = (v: number) =>
-    v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 
   // Not connected state
   if (!isConnected && !loading) {

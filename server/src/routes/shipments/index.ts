@@ -1,12 +1,13 @@
 import type { FastifyInstance } from 'fastify';
 import { authMiddleware } from '../../middleware/auth.js';
+import { requireRole } from '../../middleware/rbac.js';
 import { queryMany, queryOne, query } from '../../lib/db.js';
 import { getTenantFilter } from '../../middleware/tenantScope.js';
 
 export async function registerShipmentRoutes(app: FastifyInstance) {
   // List shipments
   app.get('/api/shipments', {
-    preHandler: [authMiddleware],
+    preHandler: [authMiddleware, requireRole('admin', 'manager', 'operator')],
   }, async (request) => {
     const { tenantId, isAdmin } = getTenantFilter(request);
     const { limit, offset } = request.query as { limit?: string; offset?: string };
@@ -33,7 +34,7 @@ export async function registerShipmentRoutes(app: FastifyInstance) {
 
   // Get single shipment
   app.get('/api/shipments/:shipmentId', {
-    preHandler: [authMiddleware],
+    preHandler: [authMiddleware, requireRole('admin', 'manager', 'operator')],
   }, async (request, reply) => {
     const { shipmentId } = request.params as { shipmentId: string };
 
@@ -54,7 +55,7 @@ export async function registerShipmentRoutes(app: FastifyInstance) {
 
   // Update shipment status
   app.patch('/api/shipments/:shipmentId', {
-    preHandler: [authMiddleware],
+    preHandler: [authMiddleware, requireRole('admin', 'manager', 'operator')],
   }, async (request, reply) => {
     const { shipmentId } = request.params as { shipmentId: string };
     const body = request.body as {
@@ -96,7 +97,7 @@ export async function registerShipmentRoutes(app: FastifyInstance) {
 
   // Update shipment by order ID (used by operator pages)
   app.patch('/api/shipments/by-order/:orderId', {
-    preHandler: [authMiddleware],
+    preHandler: [authMiddleware, requireRole('admin', 'manager', 'operator')],
   }, async (request, reply) => {
     const { orderId } = request.params as { orderId: string };
     const body = request.body as {

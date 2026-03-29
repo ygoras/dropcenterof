@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
+import { formatDateTime as formatDate } from "@/lib/formatters";
 import {
   ShieldAlert,
   AlertTriangle,
@@ -13,6 +14,7 @@ import {
   Unlink,
 } from "lucide-react";
 import { api } from "@/lib/apiClient";
+import { toast } from "@/hooks/use-toast";
 import { StatusBadge } from "@/components/StatusBadge";
 
 interface TokenAlert {
@@ -40,6 +42,41 @@ interface SyncAlert {
   error_detail: string | null;
 }
 
+interface AlertProfile {
+  id: string;
+  name: string;
+  email: string;
+  tenant_id: string | null;
+}
+
+interface AlertCredential {
+  tenant_id: string;
+  ml_nickname: string | null;
+  expires_at: string;
+}
+
+interface AlertListingRow {
+  id: string;
+  title: string;
+  ml_item_id: string | null;
+  tenant_id: string;
+  sync_status: string;
+  last_sync_at: string | null;
+  created_at: string;
+  error_message?: string | null;
+  products?: { name: string; sku: string } | null;
+}
+
+interface AlertTenantRow {
+  id: string;
+  name: string;
+}
+
+interface AlertRoleRow {
+  user_id: string;
+  role: string;
+}
+
 const AlertasML = () => {
   const [tokenAlerts, setTokenAlerts] = useState<TokenAlert[]>([]);
   const [syncAlerts, setSyncAlerts] = useState<SyncAlert[]>([]);
@@ -48,19 +85,19 @@ const AlertasML = () => {
   const [autoRefresh, setAutoRefresh] = useState(true);
 
   const fetchAlerts = useCallback(async () => {
-    let profiles: any[] = [];
-    let credentials: any[] = [];
-    let errorListings: any[] = [];
-    let tenants: any[] = [];
-    let sellerRoles: any[] = [];
+    let profiles: AlertProfile[] = [];
+    let credentials: AlertCredential[] = [];
+    let errorListings: AlertListingRow[] = [];
+    let tenants: AlertTenantRow[] = [];
+    let sellerRoles: AlertRoleRow[] = [];
 
     try {
       const [profilesRes, credentialsRes, listingsRes, tenantsRes, rolesRes] = await Promise.all([
-        api.get<any[]>("/api/profiles"),
-        api.get<any[]>("/api/ml/credentials"),
-        api.get<any[]>("/api/ml/listings?sync_status=error"),
-        api.get<any[]>("/api/tenants"),
-        api.get<any[]>("/api/user-roles?role=seller"),
+        api.get<AlertProfile[]>("/api/profiles"),
+        api.get<AlertCredential[]>("/api/ml/credentials"),
+        api.get<AlertListingRow[]>("/api/ml/listings?sync_status=error"),
+        api.get<AlertTenantRow[]>("/api/tenants"),
+        api.get<AlertRoleRow[]>("/api/user-roles?role=seller"),
       ]);
 
       profiles = profilesRes || [];
@@ -68,8 +105,10 @@ const AlertasML = () => {
       errorListings = listingsRes || [];
       tenants = tenantsRes || [];
       sellerRoles = rolesRes || [];
-    } catch (err) {
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Erro desconhecido";
       console.error("Error fetching alerts data:", err);
+      toast({ title: "Erro", description: message, variant: "destructive" });
       setLoading(false);
       return;
     }
@@ -108,7 +147,7 @@ const AlertasML = () => {
     tokens.sort((a, b) => a.hours_remaining - b.hours_remaining);
 
     // Sync error alerts
-    const syncErrors: SyncAlert[] = errorListings.map((l: any) => {
+    const syncErrors: SyncAlert[] = errorListings.map((l) => {
       const profile = profiles.find((p) => p.tenant_id === l.tenant_id);
       return {
         id: l.id,
@@ -140,14 +179,6 @@ const AlertasML = () => {
     return () => clearInterval(interval);
   }, [autoRefresh, fetchAlerts]);
 
-  const formatDate = (d: string) =>
-    new Date(d).toLocaleDateString("pt-BR", {
-      day: "2-digit",
-      month: "2-digit",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
 
   const formatTimeAgo = (hours: number) => {
     if (hours <= 0) {
@@ -161,13 +192,15 @@ const AlertasML = () => {
     return `Expira em ${Math.round(hours / 24)}d`;
   };
 
-  const filteredTokens =
+  const filteredTokens = useMemo(() =>
     severityFilter === "all"
       ? tokenAlerts
-      : tokenAlerts.filter((t) => t.severity === severityFilter);
+      : tokenAlerts.filter((t) => t.severity === severityFilter),
+    [tokenAlerts, severityFilter]
+  );
 
-  const criticalCount = tokenAlerts.filter((t) => t.severity === "critical").length;
-  const warningCount = tokenAlerts.filter((t) => t.severity === "warning").length;
+  const criticalCount = useMemo(() => tokenAlerts.filter((t) => t.severity === "critical").length, [tokenAlerts]);
+  const warningCount = useMemo(() => tokenAlerts.filter((t) => t.severity === "warning").length, [tokenAlerts]);
   const totalAlerts = tokenAlerts.length + syncAlerts.length;
 
   if (loading) {
@@ -272,7 +305,7 @@ const AlertasML = () => {
               <Filter className="w-4 h-4 text-muted-foreground" />
               <select
                 value={severityFilter}
-                onChange={(e) => setSeverityFilter(e.target.value as any)}
+                onChange={(e) => setSeverityFilter(e.target.value as "all" | "critical" | "warning")}
                 className="h-8 px-2 rounded-lg border border-input bg-background text-foreground text-xs focus:outline-none focus:ring-2 focus:ring-ring"
               >
                 <option value="all">Todos</option>

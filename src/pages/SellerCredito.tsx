@@ -29,14 +29,7 @@ import {
   DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog";
-
-const formatCurrency = (value: number) =>
-  new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(value);
-
-const formatDate = (date: string) => {
-  const d = new Date(date);
-  return isNaN(d.getTime()) ? "" : d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "2-digit", hour: "2-digit", minute: "2-digit" });
-};
+import { formatCurrency, formatDateTime as formatDate } from "@/lib/formatters";
 
 const SellerCredito = () => {
   const { balance, transactions, forecast, loading, generating, generatePix, cancelCharge, reopenPix, checkChargeStatus, refetch } = useWallet();

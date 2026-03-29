@@ -11,13 +11,12 @@ import {
   ArrowDownRight,
 } from "lucide-react";
 import { useAdminWallet, SellerWalletInfo } from "@/hooks/useAdminWallet";
+import { formatCurrency } from "@/lib/formatters";
 
 const Financeiro = () => {
   const { sellers, summary, loading } = useAdminWallet();
   const [search, setSearch] = useState("");
 
-  const formatCurrency = (value: number) =>
-    value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 
   const filtered = sellers.filter(
     (s) =>

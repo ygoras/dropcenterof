@@ -1,10 +1,44 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { Package, ShoppingCart, Wallet, TrendingUp, AlertTriangle, Clock, DollarSign } from "lucide-react";
 import { StatCard } from "@/components/StatCard";
 import { StatusBadge } from "@/components/StatusBadge";
 import { api } from "@/lib/apiClient";
+import { formatCurrency, formatDate } from "@/lib/formatters";
 import { useProfile } from "@/hooks/useProfile";
 import { Link } from "react-router-dom";
+import type { AvailableStock, SubscriptionStatus, PaymentStatus } from "@/types/database";
+
+interface StockItem {
+  low_stock: boolean;
+}
+
+interface SubscriptionResponse {
+  status: SubscriptionStatus;
+  plan: { name: string; price: number } | null;
+}
+
+interface PaymentItem {
+  id: string;
+  amount: number;
+  due_date: string;
+  status: PaymentStatus;
+}
+
+interface OrderItem {
+  id: string;
+  status: string;
+  total: number;
+  created_at: string;
+}
+
+interface WalletBalanceResponse {
+  balance: number;
+}
+
+interface SpendingForecastResponse {
+  days_until_empty: number;
+  error?: string;
+}
 
 interface SellerStats {
   totalProducts: number;
@@ -59,30 +93,30 @@ const SellerDashboard = () => {
 
       const [productsRes, stockRes, subRes, paymentsRes, listingsRes, ordersRes] = await Promise.all([
         api.get<{ count: number }>(`/api/products?tenant_id=${tenantId}&status=active&count_only=true`),
-        api.get<any[]>(`/api/stock?tenant_id=${tenantId}`),
-        api.get<any>(`/api/subscriptions?tenant_id=${tenantId}`),
-        api.get<any[]>(`/api/payments?tenant_id=${tenantId}&limit=5&order=due_date.desc`),
+        api.get<StockItem[]>(`/api/stock?tenant_id=${tenantId}`),
+        api.get<SubscriptionResponse>(`/api/subscriptions?tenant_id=${tenantId}`),
+        api.get<PaymentItem[]>(`/api/payments?tenant_id=${tenantId}&limit=5&order=due_date.desc`),
         api.get<{ count: number }>(`/api/ml-listings?tenant_id=${tenantId}&status=active&count_only=true`),
-        api.get<any[]>(`/api/orders?tenant_id=${tenantId}&fields=status,total,created_at`),
+        api.get<OrderItem[]>(`/api/orders?tenant_id=${tenantId}&fields=status,total,created_at`),
       ]);
 
-      const lowStockItems = (stockRes ?? []).filter((s: { low_stock: boolean }) => s.low_stock);
-      const nextPending = (paymentsRes ?? []).find((p: { status: string }) => p.status === "pending");
-      const plan = subRes?.plan as { name: string; price: number } | null;
+      const lowStockItems = (stockRes ?? []).filter((s) => s.low_stock);
+      const nextPending = (paymentsRes ?? []).find((p) => p.status === "pending");
+      const plan = subRes?.plan ?? null;
 
       // Calculate pending orders (all non-terminal statuses)
       const allOrders = ordersRes ?? [];
-      const pendingOrders = allOrders.filter((o: { status: string }) =>
+      const pendingOrders = allOrders.filter((o) =>
         ["pending", "pending_credit", "approved", "picking", "packing", "packed", "labeled", "invoiced", "shipped"].includes(o.status)
       ).length;
-      const pendingCreditOrders = allOrders.filter((o: { status: string }) => o.status === "pending_credit").length;
+      const pendingCreditOrders = allOrders.filter((o) => o.status === "pending_credit").length;
 
       // Calculate monthly revenue from delivered/shipped orders this month
       const monthlyRevenue = allOrders
-        .filter((o: { status: string; created_at: string }) =>
+        .filter((o) =>
           !["cancelled", "returned"].includes(o.status) && o.created_at >= monthStart
         )
-        .reduce((sum: number, o: { total: number }) => sum + (o.total || 0), 0);
+        .reduce((sum, o) => sum + (o.total || 0), 0);
 
       setStats({
         totalProducts: productsRes?.count ?? 0,
@@ -98,7 +132,7 @@ const SellerDashboard = () => {
       });
 
       setRecentPayments(
-        (paymentsRes ?? []).map((p: { id: string; amount: number; due_date: string; status: string }) => ({
+        (paymentsRes ?? []).map((p) => ({
           id: p.id,
           amount: p.amount,
           due_date: p.due_date,
@@ -108,9 +142,9 @@ const SellerDashboard = () => {
 
       // Fetch wallet info
       try {
-        const balData = await api.post<any>("/api/asaas-pix", { action: "get_balance" });
+        const balData = await api.post<WalletBalanceResponse>("/api/asaas-pix", { action: "get_balance" });
         if (balData) setWalletBalance(balData.balance ?? 0);
-        const fcData = await api.post<any>("/api/asaas-pix", { action: "get_spending_forecast" });
+        const fcData = await api.post<SpendingForecastResponse>("/api/asaas-pix", { action: "get_spending_forecast" });
         if (fcData && !fcData.error) setDaysUntilEmpty(fcData.days_until_empty);
       } catch {}
 
@@ -120,11 +154,6 @@ const SellerDashboard = () => {
     fetchStats();
   }, [profile?.tenant_id]);
 
-  const formatCurrency = (value: number) =>
-    new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(value);
-
-  const formatDate = (date: string) =>
-    new Date(date + "T00:00:00").toLocaleDateString("pt-BR");
 
   if (loading) {
     return (

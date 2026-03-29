@@ -1,11 +1,12 @@
 import type { FastifyInstance } from 'fastify';
 import { authMiddleware } from '../../middleware/auth.js';
+import { requireRole } from '../../middleware/rbac.js';
 import { queryMany, queryOne, query } from '../../lib/db.js';
 
 export async function registerPickingRoutes(app: FastifyInstance) {
   // List picking tasks
   app.get('/api/picking-tasks', {
-    preHandler: [authMiddleware],
+    preHandler: [authMiddleware, requireRole('admin', 'manager', 'operator')],
   }, async (request) => {
     const { finished, fields } = request.query as { finished?: string; fields?: string };
 
@@ -35,7 +36,7 @@ export async function registerPickingRoutes(app: FastifyInstance) {
 
   // Create picking task
   app.post('/api/picking-tasks', {
-    preHandler: [authMiddleware],
+    preHandler: [authMiddleware, requireRole('admin', 'manager', 'operator')],
   }, async (request, reply) => {
     const { order_id, operator_id } = request.body as { order_id: string; operator_id?: string };
 
@@ -50,7 +51,7 @@ export async function registerPickingRoutes(app: FastifyInstance) {
 
   // Update picking task by order ID
   app.patch('/api/picking-tasks/by-order/:orderId', {
-    preHandler: [authMiddleware],
+    preHandler: [authMiddleware, requireRole('admin', 'manager', 'operator')],
   }, async (request, reply) => {
     const { orderId } = request.params as { orderId: string };
     const { status, completed_at } = request.body as { status?: string; completed_at?: string };
@@ -75,7 +76,7 @@ export async function registerPickingRoutes(app: FastifyInstance) {
 
   // Update picking task by ID
   app.patch('/api/picking-tasks/:taskId', {
-    preHandler: [authMiddleware],
+    preHandler: [authMiddleware, requireRole('admin', 'manager', 'operator')],
   }, async (request, reply) => {
     const { taskId } = request.params as { taskId: string };
     const { status, operator_id, started_at, completed_at } = request.body as {

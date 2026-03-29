@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { formatCurrency } from "@/lib/formatters";
 import {
   Package,
   Search,
@@ -58,7 +59,6 @@ const SellerCatalogo = () => {
     return matchSearch && matchCategory;
   });
 
-  const formatCurrency = (v: number) => v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 
   const handlePublish = async () => {
     if (!detailProduct || calculatedPrice <= 0 || publishing) return;

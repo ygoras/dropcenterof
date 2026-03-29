@@ -1,4 +1,5 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
+import { formatDateTime as formatDate } from "@/lib/formatters";
 import {
   Truck,
   Package,
@@ -14,8 +15,52 @@ import {
   ExternalLink,
 } from "lucide-react";
 import { api } from "@/lib/apiClient";
+import { toast } from "@/hooks/use-toast";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+
+interface OrderRow {
+  id: string;
+  status: string;
+  tenant_id: string;
+  created_at: string;
+  order_number: string;
+  customer_name: string;
+  items: OrderItemEntry[];
+}
+
+interface OrderItemEntry {
+  product_id: string;
+  quantity: number;
+  sku?: string;
+  name?: string;
+}
+
+interface PickingTask {
+  id: string;
+  order_id: string;
+  operator_id: string | null;
+  status: string;
+  started_at: string | null;
+  completed_at: string | null;
+  created_at: string;
+}
+
+interface TenantRow {
+  id: string;
+  name: string;
+}
+
+interface ProfileRow {
+  id: string;
+  name: string;
+  tenant_id: string | null;
+}
+
+interface ShipmentRow {
+  id: string;
+  shipped_at: string | null;
+}
 
 interface PickingTaskRow {
   id: string;
@@ -54,19 +99,19 @@ const Logistica = () => {
   const fetchData = async () => {
     setLoading(true);
 
-    let orders: any[] = [];
-    let pickingTasks: any[] = [];
-    let tenants: any[] = [];
-    let profiles: any[] = [];
-    let shipments: any[] = [];
+    let orders: OrderRow[] = [];
+    let pickingTasks: PickingTask[] = [];
+    let tenants: TenantRow[] = [];
+    let profiles: ProfileRow[] = [];
+    let shipments: ShipmentRow[] = [];
 
     try {
       const [ordersRes, pickingRes, tenantsRes, profilesRes, shipmentsRes] = await Promise.all([
-        api.get<any[]>("/api/orders?fields=id,status,tenant_id,created_at,order_number,customer_name,items"),
-        api.get<any[]>("/api/picking-tasks"),
-        api.get<any[]>("/api/tenants"),
-        api.get<any[]>("/api/profiles"),
-        api.get<any[]>("/api/shipments?limit=50"),
+        api.get<OrderRow[]>("/api/orders?fields=id,status,tenant_id,created_at,order_number,customer_name,items"),
+        api.get<PickingTask[]>("/api/picking-tasks"),
+        api.get<TenantRow[]>("/api/tenants"),
+        api.get<ProfileRow[]>("/api/profiles"),
+        api.get<ShipmentRow[]>("/api/shipments?limit=50"),
       ]);
 
       orders = ordersRes || [];
@@ -74,8 +119,10 @@ const Logistica = () => {
       tenants = tenantsRes || [];
       profiles = profilesRes || [];
       shipments = shipmentsRes || [];
-    } catch (err) {
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Erro desconhecido";
       console.error("Error fetching logistics data:", err);
+      toast({ title: "Erro", description: message, variant: "destructive" });
       setLoading(false);
       return;
     }
@@ -92,13 +139,13 @@ const Logistica = () => {
 
     const today = new Date().toISOString().split("T")[0];
     const shippedToday = shipments.filter(
-      (s: any) => s.shipped_at && s.shipped_at.startsWith(today)
+      (s) => s.shipped_at && s.shipped_at.startsWith(today)
     ).length;
 
-    const completedTasks = pickingTasks.filter((t: any) => t.completed_at && t.started_at);
+    const completedTasks = pickingTasks.filter((t) => t.completed_at && t.started_at);
     const avgMs = completedTasks.length
-      ? completedTasks.reduce((sum: number, t: any) => {
-          return sum + (new Date(t.completed_at).getTime() - new Date(t.started_at).getTime());
+      ? completedTasks.reduce((sum, t) => {
+          return sum + (new Date(t.completed_at!).getTime() - new Date(t.started_at!).getTime());
         }, 0) / completedTasks.length
       : 0;
 
@@ -112,9 +159,9 @@ const Logistica = () => {
     });
 
     // Build tasks list
-    const taskRows: PickingTaskRow[] = pickingTasks.map((t: any) => {
+    const taskRows: PickingTaskRow[] = pickingTasks.map((t) => {
       const order = orderMap[t.order_id];
-      const itemsArray = order?.items as any[] || [];
+      const itemsArray: OrderItemEntry[] = order?.items || [];
       return {
         id: t.id,
         order_id: t.order_id,
@@ -133,12 +180,12 @@ const Logistica = () => {
     });
 
     // Also add orders that are approved but don't have picking tasks yet
-    const taskOrderIds = new Set(pickingTasks.map((t: any) => t.order_id));
+    const taskOrderIds = new Set(pickingTasks.map((t) => t.order_id));
     const pendingOrders = orders.filter(
       (o) => (o.status === "approved" || o.status === "confirmed") && !taskOrderIds.has(o.id)
     );
     for (const order of pendingOrders) {
-      const itemsArray = order.items as any[] || [];
+      const itemsArray: OrderItemEntry[] = order.items || [];
       taskRows.push({
         id: `pending-${order.id}`,
         order_id: order.id,
@@ -164,15 +211,6 @@ const Logistica = () => {
     setLoading(false);
   };
 
-  const formatDate = (d: string | null) =>
-    d
-      ? new Date(d).toLocaleDateString("pt-BR", {
-          day: "2-digit",
-          month: "2-digit",
-          hour: "2-digit",
-          minute: "2-digit",
-        })
-      : "—";
 
   const formatDuration = (start: string | null, end: string | null) => {
     if (!start || !end) return "—";
@@ -193,9 +231,9 @@ const Logistica = () => {
     );
   }
 
-  const pendingTasks = tasks.filter((t) => ["awaiting", "pending"].includes(t.status));
-  const activeTasks = tasks.filter((t) => ["picking", "packing"].includes(t.status));
-  const doneTasks = tasks.filter((t) => t.status === "completed");
+  const pendingTasks = useMemo(() => tasks.filter((t) => ["awaiting", "pending"].includes(t.status)), [tasks]);
+  const activeTasks = useMemo(() => tasks.filter((t) => ["picking", "packing"].includes(t.status)), [tasks]);
+  const doneTasks = useMemo(() => tasks.filter((t) => t.status === "completed"), [tasks]);
 
   return (
     <div className="space-y-6 max-w-[1600px] animate-fade-in">

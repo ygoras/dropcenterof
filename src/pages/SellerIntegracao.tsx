@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
+import { formatDateTime as formatDate } from "@/lib/formatters";
 import {
   Store,
   Link2,
@@ -95,14 +96,6 @@ const SellerIntegracao = () => {
     setEditingStore(null);
   };
 
-  const formatDate = (d: string) =>
-    new Date(d).toLocaleDateString("pt-BR", {
-      day: "2-digit",
-      month: "2-digit",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
 
   if (loading) {
     return (

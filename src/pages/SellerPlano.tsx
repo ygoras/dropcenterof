@@ -17,14 +17,7 @@ import { toast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
-
-const formatCurrency = (v: number) =>
-  new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(v);
-
-const formatDate = (d: string) => {
-  const date = new Date(d);
-  return isNaN(date.getTime()) ? "—" : date.toLocaleDateString("pt-BR");
-};
+import { formatCurrency, formatDate } from "@/lib/formatters";
 
 interface SellerPayment {
   id: string;

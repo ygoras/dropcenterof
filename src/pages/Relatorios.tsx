@@ -7,9 +7,7 @@ import { SalesBySkuTab } from "@/components/relatorios/SalesBySkuTab";
 import { SalesByCategoryTab } from "@/components/relatorios/SalesByCategoryTab";
 import { ProductivityTab } from "@/components/relatorios/ProductivityTab";
 import { StatCard } from "@/components/StatCard";
-
-const formatCurrency = (v: number) =>
-  new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 }).format(v);
+import { formatCurrency } from "@/lib/formatters";
 
 const Relatorios = () => {
   const { data, loading, filters, setFilters, tenants, categories } = useAnalytics();

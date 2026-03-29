@@ -1,4 +1,5 @@
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useCallback } from "react";
+import { formatCurrency } from "@/lib/formatters";
 import {
   ShoppingCart,
   Package,
@@ -21,6 +22,7 @@ import { useOrders } from "@/hooks/useOrders";
 import { useProducts } from "@/hooks/useProducts";
 import { useSellers } from "@/hooks/useSellers";
 import { useNavigate } from "react-router-dom";
+import { useSSE } from "@/hooks/useSSE";
 
 interface PickingMetrics {
   avgTimeAll: number | null;
@@ -133,45 +135,48 @@ const Dashboard = () => {
   }, [outOfStockProducts, lowStockProducts, orders]);
 
   // Fetch picking metrics (all time + today)
-  useEffect(() => {
-    const fetchPickingMetrics = async () => {
-      try {
-        const data = await api.get<{ started_at: string | null; finished_at: string | null; created_at: string }[]>(
-          "/api/picking-tasks?finished=true"
-        );
+  const fetchPickingMetrics = useCallback(async () => {
+    try {
+      const data = await api.get<{ started_at: string | null; finished_at: string | null; created_at: string }[]>(
+        "/api/picking-tasks?finished=true"
+      );
 
-        if (!data) return;
+      if (!data) return;
 
-        const calcAvg = (tasks: typeof data) => {
-          const valid = tasks.filter((t) => t.started_at && t.finished_at);
-          if (valid.length === 0) return null;
-          const totalMin = valid.reduce((acc, t) => {
-            return acc + (new Date(t.finished_at!).getTime() - new Date(t.started_at!).getTime()) / 60000;
-          }, 0);
-          return Math.round(totalMin / valid.length);
-        };
+      const calcAvg = (tasks: typeof data) => {
+        const valid = tasks.filter((t) => t.started_at && t.finished_at);
+        if (valid.length === 0) return null;
+        const totalMin = valid.reduce((acc, t) => {
+          return acc + (new Date(t.finished_at!).getTime() - new Date(t.started_at!).getTime()) / 60000;
+        }, 0);
+        return Math.round(totalMin / valid.length);
+      };
 
-        const allCompleted = data.filter((t) => t.started_at && t.finished_at);
-        const todayCompleted = allCompleted.filter((t) => new Date(t.created_at) >= new Date(todayStart));
+      const allCompleted = data.filter((t) => t.started_at && t.finished_at);
+      const todayCompleted = allCompleted.filter((t) => new Date(t.created_at) >= new Date(todayStart));
 
-        setPickingMetrics({
-          avgTimeAll: calcAvg(allCompleted),
-          avgTimeToday: calcAvg(todayCompleted),
-          totalAll: allCompleted.length,
-          totalToday: todayCompleted.length,
-        });
-      } catch (err) {
-        console.error("Error fetching picking metrics:", err);
-      }
-    };
-
-    fetchPickingMetrics();
+      setPickingMetrics({
+        avgTimeAll: calcAvg(allCompleted),
+        avgTimeToday: calcAvg(todayCompleted),
+        totalAll: allCompleted.length,
+        totalToday: todayCompleted.length,
+      });
+    } catch (err) {
+      console.error("Error fetching picking metrics:", err);
+    }
   }, [todayStart]);
+
+  useEffect(() => {
+    fetchPickingMetrics();
+  }, [fetchPickingMetrics]);
+
+  // Realtime: auto-refresh picking metrics when orders or picking tasks change
+  useSSE(["orders", "picking_tasks"], () => {
+    fetchPickingMetrics();
+  });
 
   const activeSellers = sellers.filter((s) => s.is_active).length;
 
-  const formatCurrency = (v: number) =>
-    new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(v);
 
   return (
     <div className="space-y-6 max-w-[1400px]">

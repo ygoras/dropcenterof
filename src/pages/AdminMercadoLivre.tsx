@@ -1,4 +1,5 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
+import { formatCurrency, formatDateTime as formatDate } from "@/lib/formatters";
 import {
   Store,
   ClipboardList,
@@ -14,6 +15,7 @@ import {
   ShoppingCart,
 } from "lucide-react";
 import { api } from "@/lib/apiClient";
+import { toast } from "@/hooks/use-toast";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
@@ -62,6 +64,59 @@ interface SyncLogEntry {
   updated_at: string;
 }
 
+interface MLProfile {
+  id: string;
+  name: string;
+  email: string;
+  tenant_id: string | null;
+}
+
+interface MLCredential {
+  tenant_id: string;
+  ml_nickname: string | null;
+  ml_user_id: string | null;
+  expires_at: string;
+}
+
+interface MLListingRow {
+  id: string;
+  title: string;
+  price: number;
+  status: string;
+  sync_status: string;
+  ml_item_id: string | null;
+  category_id: string | null;
+  last_sync_at: string | null;
+  created_at: string;
+  tenant_id: string;
+  product_id: string;
+  products?: { name: string; sku: string; images: string[] } | null;
+}
+
+interface MLTenantRow {
+  id: string;
+  name: string;
+}
+
+interface MLSellerRole {
+  user_id: string;
+  role: string;
+}
+
+interface MLOrderRow {
+  id: string;
+  items: Array<{ product_id: string; quantity: number }>;
+}
+
+interface AdminOverviewResponse {
+  profiles: MLProfile[];
+  credentials: MLCredential[];
+  listings: MLListingRow[];
+  tenants: MLTenantRow[];
+  sellerRoles: MLSellerRole[];
+  orders: MLOrderRow[];
+}
+
 const AdminMercadoLivre = () => {
   const [sellers, setSellers] = useState<SellerIntegration[]>([]);
   const [listings, setListings] = useState<AdminListing[]>([]);
@@ -79,11 +134,13 @@ const AdminMercadoLivre = () => {
     setLoading(true);
 
     // Use API route (replaces Edge Function) to bypass tenant-scoped RLS
-    let overview: any;
+    let overview: AdminOverviewResponse | null;
     try {
-      overview = await api.get("/api/ml/admin/overview");
-    } catch (fnError) {
+      overview = await api.get<AdminOverviewResponse>("/api/ml/admin/overview");
+    } catch (fnError: unknown) {
+      const message = fnError instanceof Error ? fnError.message : "Erro desconhecido";
       console.error("Erro ao carregar dados admin ML:", fnError);
+      toast({ title: "Erro", description: message, variant: "destructive" });
       setLoading(false);
       return;
     }
@@ -93,33 +150,33 @@ const AdminMercadoLivre = () => {
       return;
     }
 
-    const profiles = overview.profiles || [];
-    const credentials = overview.credentials || [];
-    const allListings = overview.listings || [];
-    const tenants = overview.tenants || [];
-    const sellerRoles = overview.sellerRoles || [];
-    const allOrders = overview.orders || [];
+    const profiles: MLProfile[] = overview.profiles || [];
+    const credentials: MLCredential[] = overview.credentials || [];
+    const allListings: MLListingRow[] = overview.listings || [];
+    const tenants: MLTenantRow[] = overview.tenants || [];
+    const sellerRoles: MLSellerRole[] = overview.sellerRoles || [];
+    const allOrders: MLOrderRow[] = overview.orders || [];
 
     // Build sales counts per product
     const salesCounts: Record<string, number> = {};
-    allOrders.forEach((order: any) => {
-      const items = order.items as Array<{ product_id: string; quantity: number }>;
+    allOrders.forEach((order) => {
+      const items = order.items;
       items?.forEach((item) => {
         salesCounts[item.product_id] = (salesCounts[item.product_id] || 0) + item.quantity;
       });
     });
     setSalesByProduct(salesCounts);
 
-    const tenantMap = Object.fromEntries(tenants.map((t: any) => [t.id, t.name]));
-    const credMap = Object.fromEntries(credentials.map((c: any) => [c.tenant_id, c]));
+    const tenantMap = Object.fromEntries(tenants.map((t) => [t.id, t.name]));
+    const credMap = Object.fromEntries(credentials.map((c) => [c.tenant_id, c]));
 
     // Build seller integration data
-    const sellerUserIds = new Set(sellerRoles.map((r: any) => r.user_id));
-    const sellerProfiles = profiles.filter((p: any) => sellerUserIds.has(p.id) && p.tenant_id);
+    const sellerUserIds = new Set(sellerRoles.map((r) => r.user_id));
+    const sellerProfiles = profiles.filter((p) => sellerUserIds.has(p.id) && p.tenant_id);
 
-    const sellerData: SellerIntegration[] = sellerProfiles.map((profile: any) => {
+    const sellerData: SellerIntegration[] = sellerProfiles.map((profile) => {
       const cred = credMap[profile.tenant_id!];
-      const tenantListings = allListings.filter((l: any) => l.tenant_id === profile.tenant_id);
+      const tenantListings = allListings.filter((l) => l.tenant_id === profile.tenant_id);
 
       return {
         tenant_id: profile.tenant_id!,
@@ -132,17 +189,17 @@ const AdminMercadoLivre = () => {
         expires_at: cred?.expires_at || null,
         is_expired: cred ? new Date(cred.expires_at) < new Date() : false,
         listing_count: tenantListings.length,
-        active_listings: tenantListings.filter((l: any) => l.status === "active").length,
-        draft_listings: tenantListings.filter((l: any) => l.status === "draft").length,
-        error_listings: tenantListings.filter((l: any) => l.sync_status === "error").length,
+        active_listings: tenantListings.filter((l) => l.status === "active").length,
+        draft_listings: tenantListings.filter((l) => l.status === "draft").length,
+        error_listings: tenantListings.filter((l) => l.sync_status === "error").length,
       };
     });
 
     setSellers(sellerData);
 
     // Build listings data
-    const listingData: AdminListing[] = allListings.map((l: any) => {
-      const sellerProfile = profiles.find((p: any) => p.tenant_id === l.tenant_id);
+    const listingData: AdminListing[] = allListings.map((l) => {
+      const sellerProfile = profiles.find((p) => p.tenant_id === l.tenant_id);
       return {
         id: l.id,
         title: l.title,
@@ -166,26 +223,15 @@ const AdminMercadoLivre = () => {
     setLoading(false);
   };
 
-  const formatCurrency = (v: number) =>
-    v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 
-  const formatDate = (d: string) =>
-    new Date(d).toLocaleDateString("pt-BR", {
-      day: "2-digit",
-      month: "2-digit",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-
-  const filteredSellers = sellers.filter(
+  const filteredSellers = useMemo(() => sellers.filter(
     (s) =>
       s.seller_name.toLowerCase().includes(searchSellers.toLowerCase()) ||
       s.tenant_name.toLowerCase().includes(searchSellers.toLowerCase()) ||
       (s.ml_nickname ?? "").toLowerCase().includes(searchSellers.toLowerCase())
-  );
+  ), [sellers, searchSellers]);
 
-  const filteredListings = listings.filter((l) => {
+  const filteredListings = useMemo(() => listings.filter((l) => {
     const matchSearch =
       l.title.toLowerCase().includes(searchListings.toLowerCase()) ||
       l.seller_name.toLowerCase().includes(searchListings.toLowerCase()) ||
@@ -194,7 +240,7 @@ const AdminMercadoLivre = () => {
     const matchStatus =
       statusFilter === "all" || l.status === statusFilter || l.sync_status === statusFilter;
     return matchSearch && matchStatus;
-  });
+  }), [listings, searchListings, statusFilter]);
 
   // Stats
   const totalSellers = sellers.length;

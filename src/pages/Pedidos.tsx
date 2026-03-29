@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { formatCurrency, formatDateTime as formatDate } from "@/lib/formatters";
 import {
   ShoppingCart,
   Search,
@@ -88,11 +89,6 @@ const Pedidos = () => {
     delivered: orders.filter((o) => o.status === "delivered").length,
   };
 
-  const formatCurrency = (value: number) =>
-    new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(value);
-
-  const formatDate = (date: string) =>
-    new Date(date).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "2-digit", hour: "2-digit", minute: "2-digit" });
 
   return (
     <div className="space-y-6 max-w-[1400px]">
