@@ -234,20 +234,7 @@ const Planos = () => {
             Gerencie planos, cobranças e assinaturas dos vendedores
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          {!pixConfigured && (
-            <span className="text-xs text-warning font-medium bg-warning/10 px-2 py-1 rounded-md">
-              ⚠️ PIX não configurado
-            </span>
-          )}
-          <button
-            onClick={() => setPixConfigOpen(true)}
-            className="h-9 px-3 rounded-lg border border-input bg-card text-foreground text-sm font-medium flex items-center gap-2 hover:bg-secondary transition-colors"
-          >
-            <Settings className="w-4 h-4 text-muted-foreground" />
-            Configurar PIX
-          </button>
-        </div>
+        {/* PIX configurado via Asaas — botão removido */}
       </div>
 
       <Tabs defaultValue="plans" className="w-full">

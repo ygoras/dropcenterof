@@ -110,6 +110,7 @@ export async function registerUserRoutes(app: FastifyInstance) {
       phone?: string;
       company_name?: string;
       company_document?: string;
+      plan_id?: string;
     } | null;
 
     if (!body || Object.keys(body).length === 0) {
@@ -155,6 +156,15 @@ export async function registerUserRoutes(app: FastifyInstance) {
       await query(
         `UPDATE tenants SET ${updates.join(', ')}, updated_at = NOW() WHERE id = $${idx}`,
         params
+      );
+    }
+
+    // Update subscription plan if plan_id changed
+    if (body.plan_id && profile.tenant_id) {
+      await query(
+        `UPDATE subscriptions SET plan_id = $1, updated_at = NOW()
+         WHERE tenant_id = $2`,
+        [body.plan_id, profile.tenant_id]
       );
     }
 
