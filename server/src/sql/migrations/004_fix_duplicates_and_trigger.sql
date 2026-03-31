@@ -27,38 +27,38 @@ WHERE id = (
 );
 
 -- 2. Remove any other potential duplicates (generic cleanup)
---    For each (ml_order_id, tenant_id) pair, keep only the row with the smallest id
+--    For each (ml_order_id, tenant_id) pair, keep only the oldest row by created_at
 DELETE FROM picking_tasks WHERE order_id IN (
   SELECT o.id FROM orders o
   INNER JOIN (
-    SELECT ml_order_id, tenant_id, MIN(id) AS keep_id
+    SELECT ml_order_id, tenant_id, MIN(created_at) AS keep_at
     FROM orders
     WHERE ml_order_id IS NOT NULL
     GROUP BY ml_order_id, tenant_id
     HAVING COUNT(*) > 1
-  ) dups ON o.ml_order_id = dups.ml_order_id AND o.tenant_id = dups.tenant_id AND o.id != dups.keep_id
+  ) dups ON o.ml_order_id = dups.ml_order_id AND o.tenant_id = dups.tenant_id AND o.created_at != dups.keep_at
 );
 
 DELETE FROM shipments WHERE order_id IN (
   SELECT o.id FROM orders o
   INNER JOIN (
-    SELECT ml_order_id, tenant_id, MIN(id) AS keep_id
+    SELECT ml_order_id, tenant_id, MIN(created_at) AS keep_at
     FROM orders
     WHERE ml_order_id IS NOT NULL
     GROUP BY ml_order_id, tenant_id
     HAVING COUNT(*) > 1
-  ) dups ON o.ml_order_id = dups.ml_order_id AND o.tenant_id = dups.tenant_id AND o.id != dups.keep_id
+  ) dups ON o.ml_order_id = dups.ml_order_id AND o.tenant_id = dups.tenant_id AND o.created_at != dups.keep_at
 );
 
 DELETE FROM orders WHERE id IN (
   SELECT o.id FROM orders o
   INNER JOIN (
-    SELECT ml_order_id, tenant_id, MIN(id) AS keep_id
+    SELECT ml_order_id, tenant_id, MIN(created_at) AS keep_at
     FROM orders
     WHERE ml_order_id IS NOT NULL
     GROUP BY ml_order_id, tenant_id
     HAVING COUNT(*) > 1
-  ) dups ON o.ml_order_id = dups.ml_order_id AND o.tenant_id = dups.tenant_id AND o.id != dups.keep_id
+  ) dups ON o.ml_order_id = dups.ml_order_id AND o.tenant_id = dups.tenant_id AND o.created_at != dups.keep_at
 );
 
 -- 3. Add UNIQUE constraint to prevent future duplicates
