@@ -92,17 +92,19 @@ const SellerDashboard = () => {
       const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
 
       const [productsRes, stockRes, subRes, paymentsRes, listingsRes, ordersRes] = await Promise.all([
-        api.get<{ count: number }>(`/api/products?tenant_id=${tenantId}&status=active&count_only=true`),
+        api.get<any[]>(`/api/products?tenant_id=${tenantId}`),
         api.get<StockItem[]>(`/api/stock?tenant_id=${tenantId}`),
-        api.get<SubscriptionResponse>(`/api/subscriptions?tenant_id=${tenantId}`),
+        api.get<any>(`/api/subscriptions?tenant_id=${tenantId}`),
         api.get<PaymentItem[]>(`/api/payments?tenant_id=${tenantId}&limit=5&order=due_date.desc`),
-        api.get<{ count: number }>(`/api/ml-listings?tenant_id=${tenantId}&status=active&count_only=true`),
+        api.get<any[]>(`/api/ml-listings?tenant_id=${tenantId}`),
         api.get<OrderItem[]>(`/api/orders?tenant_id=${tenantId}&fields=status,total,created_at`),
       ]);
 
       const lowStockItems = (stockRes ?? []).filter((s) => s.low_stock);
       const nextPending = (paymentsRes ?? []).find((p) => p.status === "pending");
-      const plan = subRes?.plan ?? null;
+      // subscriptions returns array — get first element
+      const subscription = Array.isArray(subRes) ? subRes[0] : subRes;
+      const plan = subscription?.plan_name ? { name: subscription.plan_name } : null;
 
       // Calculate pending orders (all non-terminal statuses)
       const allOrders = ordersRes ?? [];
@@ -119,13 +121,13 @@ const SellerDashboard = () => {
         .reduce((sum, o) => sum + (o.total || 0), 0);
 
       setStats({
-        totalProducts: productsRes?.count ?? 0,
-        activeListings: listingsRes?.count ?? 0,
+        totalProducts: Array.isArray(productsRes) ? productsRes.length : 0,
+        activeListings: Array.isArray(listingsRes) ? listingsRes.filter((l: any) => l.status === 'active').length : 0,
         pendingOrders,
         pendingCreditOrders,
         monthlyRevenue,
         planName: plan?.name ?? "—",
-        planStatus: subRes?.status ?? "active",
+        planStatus: subscription?.status ?? "active",
         nextDueDate: nextPending?.due_date ?? null,
         nextDueAmount: nextPending?.amount ?? 0,
         lowStockCount: lowStockItems.length,
