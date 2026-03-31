@@ -356,49 +356,47 @@ const OperacaoSeparacao = () => {
           })}
         </div>
       )}
-      {/* Label PDF Modal — fullscreen overlay */}
+      {/* Label PDF Modal — fullscreen */}
       {labelPdfUrl && (
-        <div className="fixed inset-0 z-[100] bg-black/80 flex flex-col">
-          {/* Header fixo */}
-          <div className="flex items-center justify-between px-6 py-3 bg-card border-b border-border shrink-0">
-            <h3 className="font-semibold text-foreground flex items-center gap-2">
+        <div className="fixed inset-0 z-[100] flex flex-col bg-background">
+          {/* Header */}
+          <div className="flex items-center justify-between px-4 py-2 bg-card border-b border-border shrink-0">
+            <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
               <Printer className="w-4 h-4 text-primary" />
-              Etiquetas ({pendingClaimIds.length} pedido{pendingClaimIds.length > 1 ? 's' : ''})
+              Etiquetas — {pendingClaimIds.length} pedido(s)
             </h3>
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2">
               <button
                 onClick={() => {
                   const iframe = document.getElementById('label-iframe') as HTMLIFrameElement;
                   if (iframe?.contentWindow) iframe.contentWindow.print();
                 }}
-                className="text-xs px-4 py-2 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-colors font-medium flex items-center gap-1.5"
+                className="px-3 py-1.5 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-colors text-xs font-medium flex items-center gap-1.5"
               >
                 <Printer className="w-3.5 h-3.5" /> Imprimir
               </button>
               <button
                 onClick={handleConfirmPrint}
                 disabled={claiming}
-                className="text-xs px-4 py-2 rounded-lg bg-green-600 text-white hover:bg-green-700 transition-colors font-medium disabled:opacity-50"
+                className="px-3 py-1.5 rounded-lg bg-green-600 text-white hover:bg-green-700 transition-colors text-xs font-medium disabled:opacity-50"
               >
                 {claiming ? "Processando..." : "Confirmar e Iniciar Separacao"}
               </button>
               <button
                 onClick={() => { if (labelPdfUrl?.startsWith('blob:')) URL.revokeObjectURL(labelPdfUrl); setLabelPdfUrl(null); setPendingClaimIds([]); }}
-                className="text-muted-foreground hover:text-foreground transition-colors"
+                className="ml-2 text-muted-foreground hover:text-foreground transition-colors"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
           </div>
-          {/* PDF viewer — ocupa todo o espaço restante */}
-          <div className="flex-1 p-4">
-            <iframe
-              id="label-iframe"
-              src={labelPdfUrl}
-              className="w-full h-full rounded-lg bg-white"
-              title="Etiquetas ML"
-            />
-          </div>
+          {/* PDF — ocupa 100% da tela restante */}
+          <iframe
+            id="label-iframe"
+            src={labelPdfUrl}
+            className="flex-1 w-full border-0"
+            title="Etiquetas ML"
+          />
         </div>
       )}
     </div>
