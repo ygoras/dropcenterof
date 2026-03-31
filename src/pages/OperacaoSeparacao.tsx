@@ -167,10 +167,11 @@ const OperacaoSeparacao = () => {
       setPendingClaimIds(ids);
       // Fetch PDF as blob (iframe can't send Auth header)
       try {
-        const res = await api.upload ? fetch(`/api/ml/label-pdf/${shipmentIds}`, {
-          headers: { 'Authorization': `Bearer ${await (window as any).Clerk?.session?.getToken()}` },
-        }) : null;
-        if (res && res.ok) {
+        const clerkToken = await (window as any).Clerk?.session?.getToken();
+        const res = await fetch(`/api/ml/label-pdf/${shipmentIds}`, {
+          headers: { 'Authorization': `Bearer ${clerkToken}` },
+        });
+        if (res.ok) {
           const blob = await res.blob();
           const blobUrl = URL.createObjectURL(blob);
           setLabelPdfUrl(blobUrl);
