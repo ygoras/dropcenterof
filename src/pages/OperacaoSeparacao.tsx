@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
+import { createPortal } from "react-dom";
 import { Package, RefreshCw, CheckSquare, Square, ChevronDown, ChevronRight, Play, Filter, Search, Printer, X } from "lucide-react";
 import { api } from "@/lib/apiClient";
 import { useSSE } from "@/hooks/useSSE";
@@ -356,19 +357,23 @@ const OperacaoSeparacao = () => {
           })}
         </div>
       )}
-      {/* Label PDF Modal — centralizado, 60% da tela */}
-      {labelPdfUrl && (
+      {/* Label PDF Modal — portal no body, centralizado, 60% da tela */}
+      {labelPdfUrl && createPortal(
         <>
-          {/* Backdrop */}
+          {/* Backdrop — cobre TUDO incluindo header e sidebar */}
           <div
-            className="fixed inset-0 z-[9998] bg-black/50"
+            className="fixed inset-0 bg-black/60"
+            style={{ zIndex: 99998 }}
             onClick={() => { if (labelPdfUrl?.startsWith('blob:')) URL.revokeObjectURL(labelPdfUrl); setLabelPdfUrl(null); setPendingClaimIds([]); }}
           />
-          {/* Modal */}
-          <div className="fixed inset-0 z-[9999] flex items-center justify-center pointer-events-none">
-            <div className="pointer-events-auto flex flex-col bg-card rounded-xl shadow-2xl border border-border overflow-hidden" style={{ width: '60%', height: '80vh' }}>
+          {/* Modal centralizado */}
+          <div
+            className="fixed flex items-center justify-center"
+            style={{ zIndex: 99999, top: 0, left: 0, right: 0, bottom: 0 }}
+          >
+            <div className="flex flex-col bg-card rounded-xl shadow-2xl border border-border overflow-hidden" style={{ width: '60%', height: '80vh', maxWidth: '900px' }}>
               {/* Header */}
-              <div className="flex items-center justify-between px-4 py-3 border-b-2 border-primary/30 shrink-0">
+              <div className="flex items-center justify-between px-4 py-3 border-b-2 border-primary/30 shrink-0 bg-card">
                 <h3 className="text-base font-bold text-foreground flex items-center gap-2">
                   <Printer className="w-5 h-5 text-primary" />
                   Etiquetas — {pendingClaimIds.length} pedido(s)
@@ -408,7 +413,8 @@ const OperacaoSeparacao = () => {
               />
             </div>
           </div>
-        </>
+        </>,
+        document.body
       )}
     </div>
   );
