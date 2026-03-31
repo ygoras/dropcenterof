@@ -165,7 +165,21 @@ const OperacaoSeparacao = () => {
 
     if (shipmentIds) {
       setPendingClaimIds(ids);
-      setLabelPdfUrl(`/api/ml/label-pdf/${shipmentIds}`);
+      // Fetch PDF as blob (iframe can't send Auth header)
+      try {
+        const res = await api.upload ? fetch(`/api/ml/label-pdf/${shipmentIds}`, {
+          headers: { 'Authorization': `Bearer ${await (window as any).Clerk?.session?.getToken()}` },
+        }) : null;
+        if (res && res.ok) {
+          const blob = await res.blob();
+          const blobUrl = URL.createObjectURL(blob);
+          setLabelPdfUrl(blobUrl);
+        } else {
+          toast.error("Erro ao buscar etiqueta do ML");
+        }
+      } catch {
+        toast.error("Erro ao buscar etiqueta");
+      }
     } else {
       toast.info("Nenhuma etiqueta disponivel — aguarde o ML processar");
     }
@@ -185,6 +199,7 @@ const OperacaoSeparacao = () => {
       toast.success(`${pendingClaimIds.length} pedido(s) em separacao`);
       setSelected(new Set());
       setPendingClaimIds([]);
+      if (labelPdfUrl?.startsWith('blob:')) URL.revokeObjectURL(labelPdfUrl);
       setLabelPdfUrl(null);
       await fetchData();
     } catch {
@@ -357,7 +372,7 @@ const OperacaoSeparacao = () => {
                 >
                   {claiming ? "Processando..." : `Confirmar Impressao e Iniciar Separacao (${pendingClaimIds.length})`}
                 </button>
-                <button onClick={() => { setLabelPdfUrl(null); setPendingClaimIds([]); }} className="text-muted-foreground hover:text-foreground transition-colors">
+                <button onClick={() => { if (labelPdfUrl?.startsWith('blob:')) URL.revokeObjectURL(labelPdfUrl); setLabelPdfUrl(null); setPendingClaimIds([]); }} className="text-muted-foreground hover:text-foreground transition-colors">
                   <X className="w-5 h-5" />
                 </button>
               </div>
