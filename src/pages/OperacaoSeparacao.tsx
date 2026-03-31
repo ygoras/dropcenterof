@@ -356,35 +356,48 @@ const OperacaoSeparacao = () => {
           })}
         </div>
       )}
-      {/* Label PDF Modal */}
+      {/* Label PDF Modal — fullscreen overlay */}
       {labelPdfUrl && (
-        <div className="fixed inset-0 z-[100] bg-black/70 flex items-center justify-center p-6" onClick={() => { if (labelPdfUrl?.startsWith('blob:')) URL.revokeObjectURL(labelPdfUrl); setLabelPdfUrl(null); setPendingClaimIds([]); }}>
-          <div className="bg-card rounded-xl border border-border shadow-2xl w-full max-w-4xl max-h-[85vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between p-4 border-b border-border">
-              <h3 className="font-semibold text-foreground flex items-center gap-2">
-                <Printer className="w-4 h-4 text-primary" />
-                Etiquetas para Impressao
-              </h3>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={handleConfirmPrint}
-                  disabled={claiming}
-                  className="text-xs px-4 py-2 rounded-lg bg-green-600 text-white hover:bg-green-700 transition-colors font-medium disabled:opacity-50"
-                >
-                  {claiming ? "Processando..." : `Confirmar Impressao e Iniciar Separacao (${pendingClaimIds.length})`}
-                </button>
-                <button onClick={() => { if (labelPdfUrl?.startsWith('blob:')) URL.revokeObjectURL(labelPdfUrl); setLabelPdfUrl(null); setPendingClaimIds([]); }} className="text-muted-foreground hover:text-foreground transition-colors">
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
+        <div className="fixed inset-0 z-[100] bg-black/80 flex flex-col">
+          {/* Header fixo */}
+          <div className="flex items-center justify-between px-6 py-3 bg-card border-b border-border shrink-0">
+            <h3 className="font-semibold text-foreground flex items-center gap-2">
+              <Printer className="w-4 h-4 text-primary" />
+              Etiquetas ({pendingClaimIds.length} pedido{pendingClaimIds.length > 1 ? 's' : ''})
+            </h3>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => {
+                  const iframe = document.getElementById('label-iframe') as HTMLIFrameElement;
+                  if (iframe?.contentWindow) iframe.contentWindow.print();
+                }}
+                className="text-xs px-4 py-2 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-colors font-medium flex items-center gap-1.5"
+              >
+                <Printer className="w-3.5 h-3.5" /> Imprimir
+              </button>
+              <button
+                onClick={handleConfirmPrint}
+                disabled={claiming}
+                className="text-xs px-4 py-2 rounded-lg bg-green-600 text-white hover:bg-green-700 transition-colors font-medium disabled:opacity-50"
+              >
+                {claiming ? "Processando..." : "Confirmar e Iniciar Separacao"}
+              </button>
+              <button
+                onClick={() => { if (labelPdfUrl?.startsWith('blob:')) URL.revokeObjectURL(labelPdfUrl); setLabelPdfUrl(null); setPendingClaimIds([]); }}
+                className="text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
             </div>
-            <div className="flex-1 p-2">
-              <iframe
-                src={labelPdfUrl}
-                className="w-full h-full rounded-lg border border-border"
-                title="Etiquetas ML"
-              />
-            </div>
+          </div>
+          {/* PDF viewer — ocupa todo o espaço restante */}
+          <div className="flex-1 p-4">
+            <iframe
+              id="label-iframe"
+              src={labelPdfUrl}
+              className="w-full h-full rounded-lg bg-white"
+              title="Etiquetas ML"
+            />
           </div>
         </div>
       )}
