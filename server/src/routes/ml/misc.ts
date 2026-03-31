@@ -483,43 +483,46 @@ export async function registerMlMiscRoutes(app: FastifyInstance) {
       return reply.status(400).send({ error: 'shipmentIds inválido' });
     }
 
-    const tenantId = request.user.tenantId;
+    // Resolve tenant: operator has no tenantId, so lookup via shipment
+    let credTenantId = request.user.tenantId;
+    if (!credTenantId) {
+      const firstId = shipmentIds.split(',')[0];
+      const shipmentRow = await queryOne<{ tenant_id: string }>(
+        `SELECT s.tenant_id FROM shipments s WHERE s.ml_shipment_id = $1 LIMIT 1`,
+        [firstId]
+      );
+      credTenantId = shipmentRow?.tenant_id || null;
+    }
 
-    // Get ML credentials
-    const cred = await queryOne<{ access_token: string; expires_at: string }>(
-      `SELECT access_token, expires_at FROM ml_credentials WHERE tenant_id = $1 LIMIT 1`,
-      [tenantId]
-    );
+    // Get ML credentials for the tenant
+    let accessToken: string | null = null;
+    if (credTenantId) {
+      const cred = await queryOne<{ access_token: string }>(
+        `SELECT access_token FROM ml_credentials WHERE tenant_id = $1 LIMIT 1`,
+        [credTenantId]
+      );
+      accessToken = cred?.access_token || null;
+    }
 
-    if (!cred) {
-      // Try admin credentials for operators (no tenant)
-      const adminCred = await queryOne<{ access_token: string }>(
+    // Fallback: try any available ML credential
+    if (!accessToken) {
+      const anyCred = await queryOne<{ access_token: string }>(
         `SELECT access_token FROM ml_credentials ORDER BY updated_at DESC LIMIT 1`
       );
-      if (!adminCred) {
-        return reply.status(400).send({ error: 'Credenciais ML não encontradas' });
-      }
+      accessToken = anyCred?.access_token || null;
+    }
 
-      const pdfRes = await fetch(
-        `${ML_API}/shipment_labels?shipment_ids=${shipmentIds}&response_type=pdf&access_token=${adminCred.access_token}`
-      );
-
-      if (!pdfRes.ok) {
-        return reply.status(pdfRes.status).send({ error: 'Erro ao buscar etiqueta' });
-      }
-
-      const pdfBuffer = Buffer.from(await pdfRes.arrayBuffer());
-      return reply.type('application/pdf').send(pdfBuffer);
+    if (!accessToken) {
+      return reply.status(400).send({ error: 'Credenciais ML não encontradas' });
     }
 
     const pdfRes = await fetch(
-      `${ML_API}/shipment_labels?shipment_ids=${shipmentIds}&response_type=pdf&access_token=${cred.access_token}`
+      `${ML_API}/shipment_labels?shipment_ids=${shipmentIds}&response_type=pdf&access_token=${accessToken}`
     );
 
     if (!pdfRes.ok) {
-      const errText = await pdfRes.text();
       logger.error({ status: pdfRes.status, shipmentIds }, 'Label PDF fetch failed');
-      return reply.status(pdfRes.status).send({ error: 'Erro ao buscar etiqueta' });
+      return reply.status(pdfRes.status).send({ error: 'Erro ao buscar etiqueta do ML' });
     }
 
     const pdfBuffer = Buffer.from(await pdfRes.arrayBuffer());

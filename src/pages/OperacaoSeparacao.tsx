@@ -26,6 +26,7 @@ const OperacaoSeparacao = () => {
   const [expandedSku, setExpandedSku] = useState<string | null>(null);
   const [claiming, setClaiming] = useState(false);
   const [labelPdfUrl, setLabelPdfUrl] = useState<string | null>(null);
+  const [pendingClaimIds, setPendingClaimIds] = useState<string[]>([]);
   const [skuFilter, setSkuFilter] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("");
 
@@ -149,39 +150,45 @@ const OperacaoSeparacao = () => {
     });
   };
 
+  // Step 1: Show label PDF first (don't change order status yet)
   const handleClaimSelected = async () => {
-    if (!user || selected.size === 0) {
+    if (selected.size === 0) {
       toast.warning("Selecione pelo menos um pedido");
       return;
     }
+    const ids = Array.from(selected);
+    const selectedTasks = queue.filter((o) => selected.has(o.order_id));
+    const shipmentIds = selectedTasks
+      .filter((t) => t.ml_shipment_id)
+      .map((t) => t.ml_shipment_id)
+      .join(",");
+
+    if (shipmentIds) {
+      setPendingClaimIds(ids);
+      setLabelPdfUrl(`/api/ml/label-pdf/${shipmentIds}`);
+    } else {
+      toast.info("Nenhuma etiqueta disponivel — aguarde o ML processar");
+    }
+  };
+
+  // Step 2: After confirming print, change status to picking
+  const handleConfirmPrint = async () => {
+    if (!user || pendingClaimIds.length === 0) return;
     setClaiming(true);
     try {
-      const ids = Array.from(selected);
-      for (const orderId of ids) {
+      for (const orderId of pendingClaimIds) {
         await api.patch(`/api/orders/${orderId}`, { status: "picking" });
         await api.post("/api/picking-tasks", {
           order_id: orderId, operator_id: user.id, status: "picking", started_at: new Date().toISOString(),
         });
       }
-
-      // Show label PDF in modal via backend proxy
-      const selectedTasks = queue.filter((o) => selected.has(o.order_id));
-      const shipmentIds = selectedTasks
-        .filter((t) => t.ml_shipment_id)
-        .map((t) => t.ml_shipment_id)
-        .join(",");
-
-      if (shipmentIds) {
-        setLabelPdfUrl(`/api/ml/label-pdf/${shipmentIds}`);
-        toast.success(`${selectedTasks.length} pedido(s) em separação — etiqueta disponível`);
-      } else {
-        toast.info("Nenhuma etiqueta disponível ainda — aguarde o ML processar");
-      }
-
+      toast.success(`${pendingClaimIds.length} pedido(s) em separacao`);
       setSelected(new Set());
+      setPendingClaimIds([]);
+      setLabelPdfUrl(null);
       await fetchData();
     } catch {
-      toast.error("Erro ao iniciar separação");
+      toast.error("Erro ao iniciar separacao");
     } finally {
       setClaiming(false);
     }
@@ -343,15 +350,14 @@ const OperacaoSeparacao = () => {
                 Etiquetas para Impressao
               </h3>
               <div className="flex items-center gap-2">
-                <a
-                  href={labelPdfUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-xs px-3 py-1.5 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
+                <button
+                  onClick={handleConfirmPrint}
+                  disabled={claiming}
+                  className="text-xs px-4 py-2 rounded-lg bg-green-600 text-white hover:bg-green-700 transition-colors font-medium disabled:opacity-50"
                 >
-                  Abrir em nova aba
-                </a>
-                <button onClick={() => setLabelPdfUrl(null)} className="text-muted-foreground hover:text-foreground transition-colors">
+                  {claiming ? "Processando..." : `Confirmar Impressao e Iniciar Separacao (${pendingClaimIds.length})`}
+                </button>
+                <button onClick={() => { setLabelPdfUrl(null); setPendingClaimIds([]); }} className="text-muted-foreground hover:text-foreground transition-colors">
                   <X className="w-5 h-5" />
                 </button>
               </div>
