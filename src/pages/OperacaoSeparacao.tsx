@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { Package, RefreshCw, CheckSquare, Square, ChevronDown, ChevronRight, Play, Filter, Search } from "lucide-react";
+import { Package, RefreshCw, CheckSquare, Square, ChevronDown, ChevronRight, Play, Filter, Search, Printer, X } from "lucide-react";
 import { api } from "@/lib/apiClient";
 import { useSSE } from "@/hooks/useSSE";
 import { useAuth } from "@/contexts/AuthContext";
@@ -25,6 +25,7 @@ const OperacaoSeparacao = () => {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [expandedSku, setExpandedSku] = useState<string | null>(null);
   const [claiming, setClaiming] = useState(false);
+  const [labelPdfUrl, setLabelPdfUrl] = useState<string | null>(null);
   const [skuFilter, setSkuFilter] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("");
 
@@ -163,18 +164,21 @@ const OperacaoSeparacao = () => {
         });
       }
 
-      // Open label URLs
+      // Show label PDF in modal via backend proxy
       const selectedTasks = queue.filter((o) => selected.has(o.order_id));
-      const withLabels = selectedTasks.filter((t) => t.label_url);
-      if (withLabels.length > 0) {
-        withLabels.forEach((t) => window.open(t.label_url!, "_blank"));
-        toast.success(`${withLabels.length} etiqueta(s) abertas para impressão`);
+      const shipmentIds = selectedTasks
+        .filter((t) => t.ml_shipment_id)
+        .map((t) => t.ml_shipment_id)
+        .join(",");
+
+      if (shipmentIds) {
+        setLabelPdfUrl(`/api/ml/label-pdf/${shipmentIds}`);
+        toast.success(`${selectedTasks.length} pedido(s) em separação — etiqueta disponível`);
       } else {
-        toast.info("Nenhuma etiqueta disponível ainda");
+        toast.info("Nenhuma etiqueta disponível ainda — aguarde o ML processar");
       }
 
       setSelected(new Set());
-      toast.success(`${ids.length} pedido(s) movidos para embalagem`);
       await fetchData();
     } catch {
       toast.error("Erro ao iniciar separação");
@@ -327,6 +331,39 @@ const OperacaoSeparacao = () => {
               </div>
             );
           })}
+        </div>
+      )}
+      {/* Label PDF Modal */}
+      {labelPdfUrl && (
+        <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4" onClick={() => setLabelPdfUrl(null)}>
+          <div className="bg-card rounded-xl border border-border shadow-2xl w-full max-w-4xl h-[90vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between p-4 border-b border-border">
+              <h3 className="font-semibold text-foreground flex items-center gap-2">
+                <Printer className="w-4 h-4 text-primary" />
+                Etiquetas para Impressao
+              </h3>
+              <div className="flex items-center gap-2">
+                <a
+                  href={labelPdfUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-xs px-3 py-1.5 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
+                >
+                  Abrir em nova aba
+                </a>
+                <button onClick={() => setLabelPdfUrl(null)} className="text-muted-foreground hover:text-foreground transition-colors">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+            <div className="flex-1 p-2">
+              <iframe
+                src={labelPdfUrl}
+                className="w-full h-full rounded-lg border border-border"
+                title="Etiquetas ML"
+              />
+            </div>
+          </div>
         </div>
       )}
     </div>

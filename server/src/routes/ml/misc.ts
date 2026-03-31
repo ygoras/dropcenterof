@@ -473,6 +473,59 @@ export async function registerMlMiscRoutes(app: FastifyInstance) {
     }
   });
 
+  // ─── Label PDF Proxy (returns PDF for browser/modal display) ────────
+  app.get('/api/ml/label-pdf/:shipmentIds', {
+    preHandler: [authMiddleware],
+  }, async (request, reply) => {
+    const { shipmentIds } = request.params as { shipmentIds: string };
+
+    if (!shipmentIds || !/^[\d,]+$/.test(shipmentIds)) {
+      return reply.status(400).send({ error: 'shipmentIds inválido' });
+    }
+
+    const tenantId = request.user.tenantId;
+
+    // Get ML credentials
+    const cred = await queryOne<{ access_token: string; expires_at: string }>(
+      `SELECT access_token, expires_at FROM ml_credentials WHERE tenant_id = $1 LIMIT 1`,
+      [tenantId]
+    );
+
+    if (!cred) {
+      // Try admin credentials for operators (no tenant)
+      const adminCred = await queryOne<{ access_token: string }>(
+        `SELECT access_token FROM ml_credentials ORDER BY updated_at DESC LIMIT 1`
+      );
+      if (!adminCred) {
+        return reply.status(400).send({ error: 'Credenciais ML não encontradas' });
+      }
+
+      const pdfRes = await fetch(
+        `${ML_API}/shipment_labels?shipment_ids=${shipmentIds}&response_type=pdf&access_token=${adminCred.access_token}`
+      );
+
+      if (!pdfRes.ok) {
+        return reply.status(pdfRes.status).send({ error: 'Erro ao buscar etiqueta' });
+      }
+
+      const pdfBuffer = Buffer.from(await pdfRes.arrayBuffer());
+      return reply.type('application/pdf').send(pdfBuffer);
+    }
+
+    const pdfRes = await fetch(
+      `${ML_API}/shipment_labels?shipment_ids=${shipmentIds}&response_type=pdf&access_token=${cred.access_token}`
+    );
+
+    if (!pdfRes.ok) {
+      const errText = await pdfRes.text();
+      logger.error({ status: pdfRes.status, shipmentIds }, 'Label PDF fetch failed');
+      return reply.status(pdfRes.status).send({ error: 'Erro ao buscar etiqueta' });
+    }
+
+    const pdfBuffer = Buffer.from(await pdfRes.arrayBuffer());
+    return reply.type('application/pdf').send(pdfBuffer);
+  });
+
   // ─── Admin Overview ────────────────────────────────────────────────
   app.get('/api/ml/admin/overview', {
     preHandler: [authMiddleware, requireRole('admin', 'manager')],
