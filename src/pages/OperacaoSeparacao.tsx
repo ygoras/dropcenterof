@@ -358,7 +358,7 @@ const OperacaoSeparacao = () => {
       )}
       {/* Label PDF Modal — fullscreen */}
       {labelPdfUrl && (
-        <div className="fixed top-0 left-0 right-0 bottom-0 z-[9999] flex flex-col bg-background" style={{ width: '100vw', height: '100vh' }}>
+        <div className="fixed top-0 left-0 z-[9999] flex flex-col bg-background" style={{ width: '100vw', height: '100vh', overflow: 'hidden' }}>
           {/* Header */}
           <div className="flex items-center justify-between px-4 py-2 bg-card border-b border-border shrink-0">
             <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
@@ -395,7 +395,7 @@ const OperacaoSeparacao = () => {
             id="label-iframe"
             src={labelPdfUrl}
             className="w-full border-0"
-            style={{ flex: 1, minHeight: 0 }}
+            style={{ height: 'calc(100vh - 48px)' }}
             title="Etiquetas ML"
           />
         </div>
