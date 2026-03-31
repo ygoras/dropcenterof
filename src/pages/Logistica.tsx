@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect } from "react";
 import { formatDateTime as formatDate } from "@/lib/formatters";
 import {
   Truck,
@@ -231,9 +231,9 @@ const Logistica = () => {
     );
   }
 
-  const pendingTasks = useMemo(() => tasks.filter((t) => ["awaiting", "pending"].includes(t.status)), [tasks]);
-  const activeTasks = useMemo(() => tasks.filter((t) => ["picking", "packing"].includes(t.status)), [tasks]);
-  const doneTasks = useMemo(() => tasks.filter((t) => t.status === "completed"), [tasks]);
+  const pendingTasks = tasks.filter((t) => ["awaiting", "pending"].includes(t.status));
+  const activeTasks = tasks.filter((t) => ["picking", "packing"].includes(t.status));
+  const doneTasks = tasks.filter((t) => t.status === "completed");
 
   return (
     <div className="space-y-6 max-w-[1600px] animate-fade-in">
