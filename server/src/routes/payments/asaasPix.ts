@@ -581,6 +581,13 @@ export async function registerAsaasPixRoutes(app: FastifyInstance) {
         ? Math.floor(currentBalance / avgDailyCost)
         : null;
 
+      // Count pending_credit orders (blocked by insufficient wallet balance)
+      const pendingCreditResult = await queryOne<{ count: string }>(
+        `SELECT COUNT(*) as count FROM orders WHERE tenant_id = $1 AND status = 'pending_credit'`,
+        [user.tenantId]
+      );
+      const pendingCreditOrders = parseInt(pendingCreditResult?.count || '0');
+
       return reply.send({
         period_days: daysInPeriod,
         total_cost_30d: Math.round(totalCost * 100) / 100,
@@ -591,6 +598,7 @@ export async function registerAsaasPixRoutes(app: FastifyInstance) {
         monthly_forecast: Math.round(monthlyForecast * 100) / 100,
         current_balance: currentBalance,
         days_until_empty: daysUntilEmpty,
+        pending_credit_orders: pendingCreditOrders,
       });
     }
 

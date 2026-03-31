@@ -167,6 +167,33 @@ const SellerCredito = () => {
         </div>
       </div>
 
+      {/* Pending Credit Orders Alert */}
+      {forecast && forecast.pending_credit_orders > 0 && (
+        <div className="bg-warning/10 border border-warning/30 rounded-xl p-4 flex items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-lg bg-warning/20 flex items-center justify-center shrink-0">
+              <AlertTriangle className="w-5 h-5 text-warning" />
+            </div>
+            <div>
+              <p className="font-semibold text-foreground text-sm">
+                {forecast.pending_credit_orders} pedido(s) aguardando credito
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Deposite para liberar os pedidos bloqueados por saldo insuficiente.
+              </p>
+            </div>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            className="shrink-0 gap-1.5 border-warning text-warning hover:bg-warning/10"
+            onClick={() => setRechargeOpen(true)}
+          >
+            <QrCode className="w-3.5 h-3.5" /> Recarregar
+          </Button>
+        </div>
+      )}
+
       {/* Stats Row */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="glass-card rounded-xl p-4">

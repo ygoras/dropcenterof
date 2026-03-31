@@ -27,6 +27,7 @@ export interface SpendingForecast {
   monthly_forecast: number;
   current_balance: number;
   days_until_empty: number | null;
+  pending_credit_orders: number;
 }
 
 export function useWallet() {
