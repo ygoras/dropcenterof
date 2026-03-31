@@ -459,10 +459,15 @@ async function handleUpdate(cred: MlCredRow, listingId: string, newListingTypeId
     [listing.product_id, listing.tenant_id]
   );
 
+  // Only send available_quantity if we have stock data. Never send 0 (deactivates listing).
   const updatePayload: Record<string, unknown> = {
     price: listing.price,
-    available_quantity: stockData ? Math.max(stockData.available, 0) : 0,
   };
+
+  if (stockData && stockData.available > 0) {
+    updatePayload.available_quantity = stockData.available;
+  }
+  // If no stock data, don't send available_quantity at all — ML keeps current value.
 
   const mlResponse = await fetch(`${ML_API}/items/${listing.ml_item_id}`, {
     method: 'PUT',
