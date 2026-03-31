@@ -358,7 +358,7 @@ const OperacaoSeparacao = () => {
       )}
       {/* Label PDF Modal */}
       {labelPdfUrl && (
-        <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4" onClick={() => setLabelPdfUrl(null)}>
+        <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-8" onClick={() => { if (labelPdfUrl?.startsWith('blob:')) URL.revokeObjectURL(labelPdfUrl); setLabelPdfUrl(null); setPendingClaimIds([]); }}>
           <div className="bg-card rounded-xl border border-border shadow-2xl w-full max-w-4xl h-[90vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between p-4 border-b border-border">
               <h3 className="font-semibold text-foreground flex items-center gap-2">
