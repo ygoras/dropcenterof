@@ -356,49 +356,59 @@ const OperacaoSeparacao = () => {
           })}
         </div>
       )}
-      {/* Label PDF Modal — fullscreen */}
+      {/* Label PDF Modal — centralizado, 60% da tela */}
       {labelPdfUrl && (
-        <div className="fixed top-0 left-0 z-[9999] flex flex-col bg-background" style={{ width: '100vw', height: '100vh', overflow: 'hidden' }}>
-          {/* Header */}
-          <div className="flex items-center justify-between px-4 py-2 bg-card border-b border-border shrink-0">
-            <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
-              <Printer className="w-4 h-4 text-primary" />
-              Etiquetas — {pendingClaimIds.length} pedido(s)
-            </h3>
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => {
-                  const iframe = document.getElementById('label-iframe') as HTMLIFrameElement;
-                  if (iframe?.contentWindow) iframe.contentWindow.print();
-                }}
-                className="px-3 py-1.5 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-colors text-xs font-medium flex items-center gap-1.5"
-              >
-                <Printer className="w-3.5 h-3.5" /> Imprimir
-              </button>
-              <button
-                onClick={handleConfirmPrint}
-                disabled={claiming}
-                className="px-3 py-1.5 rounded-lg bg-green-600 text-white hover:bg-green-700 transition-colors text-xs font-medium disabled:opacity-50"
-              >
-                {claiming ? "Processando..." : "Confirmar e Iniciar Separacao"}
-              </button>
-              <button
-                onClick={() => { if (labelPdfUrl?.startsWith('blob:')) URL.revokeObjectURL(labelPdfUrl); setLabelPdfUrl(null); setPendingClaimIds([]); }}
-                className="ml-2 text-muted-foreground hover:text-foreground transition-colors"
-              >
-                <X className="w-5 h-5" />
-              </button>
+        <>
+          {/* Backdrop */}
+          <div
+            className="fixed inset-0 z-[9998] bg-black/50"
+            onClick={() => { if (labelPdfUrl?.startsWith('blob:')) URL.revokeObjectURL(labelPdfUrl); setLabelPdfUrl(null); setPendingClaimIds([]); }}
+          />
+          {/* Modal */}
+          <div className="fixed inset-0 z-[9999] flex items-center justify-center pointer-events-none">
+            <div className="pointer-events-auto flex flex-col bg-card rounded-xl shadow-2xl border border-border overflow-hidden" style={{ width: '60%', height: '80vh' }}>
+              {/* Header */}
+              <div className="flex items-center justify-between px-4 py-3 border-b-2 border-primary/30 shrink-0">
+                <h3 className="text-base font-bold text-foreground flex items-center gap-2">
+                  <Printer className="w-5 h-5 text-primary" />
+                  Etiquetas — {pendingClaimIds.length} pedido(s)
+                </h3>
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={() => {
+                      const iframe = document.getElementById('label-iframe') as HTMLIFrameElement;
+                      if (iframe?.contentWindow) iframe.contentWindow.print();
+                    }}
+                    className="px-4 py-2 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-colors text-sm font-semibold flex items-center gap-2 shadow-sm"
+                  >
+                    <Printer className="w-4 h-4" /> Imprimir
+                  </button>
+                  <button
+                    onClick={handleConfirmPrint}
+                    disabled={claiming}
+                    className="px-5 py-2 rounded-lg bg-green-600 text-white hover:bg-green-700 transition-colors text-sm font-bold disabled:opacity-50 shadow-sm"
+                  >
+                    {claiming ? "Processando..." : "✓ Confirmar e Iniciar Separação"}
+                  </button>
+                  <button
+                    onClick={() => { if (labelPdfUrl?.startsWith('blob:')) URL.revokeObjectURL(labelPdfUrl); setLabelPdfUrl(null); setPendingClaimIds([]); }}
+                    className="ml-1 p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                    title="Fechar"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+              </div>
+              {/* PDF */}
+              <iframe
+                id="label-iframe"
+                src={labelPdfUrl}
+                className="w-full border-0 flex-1"
+                title="Etiquetas ML"
+              />
             </div>
           </div>
-          {/* PDF — ocupa 100% da tela restante */}
-          <iframe
-            id="label-iframe"
-            src={labelPdfUrl}
-            className="w-full border-0"
-            style={{ height: 'calc(100vh - 48px)' }}
-            title="Etiquetas ML"
-          />
-        </div>
+        </>
       )}
     </div>
   );
