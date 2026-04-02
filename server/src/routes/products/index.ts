@@ -14,7 +14,7 @@ const createProductSchema = z.object({
   sale_price: z.number().min(0.01).optional(),
   sell_price: z.number().min(0.01).optional(),
   category_id: z.string().nullable().optional(),
-  images: z.array(z.string()).min(3, 'Mínimo 3 imagens obrigatórias'),
+  images: z.array(z.string()).min(2, 'Mínimo 2 imagens obrigatórias'),
   weight: z.number().min(0.01, 'Peso é obrigatório').optional(),
   weight_kg: z.number().min(0.01).nullable().optional(),
   width: z.number().min(0.01).optional(),

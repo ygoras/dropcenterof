@@ -118,6 +118,9 @@ export async function registerAnalyticsRoutes(app: FastifyInstance) {
       params
     );
 
+    // Admin sees cost_price (real cost), seller sees sell_price (their cost to admin)
+    const costCol = isAdmin ? 'p.cost_price' : 'p.sell_price';
+
     // Sales by SKU — unnest JSONB items array
     const skuParams = [...params];
     let skuCategoryCondition = '';
@@ -132,11 +135,11 @@ export async function registerAnalyticsRoutes(app: FastifyInstance) {
          COALESCE(item->>'product_name', 'Produto') as product_name,
          SUM((item->>'quantity')::int) as quantity_sold,
          SUM((item->>'quantity')::int * COALESCE((item->>'unit_price')::numeric, 0)) as revenue,
-         COALESCE(SUM((item->>'quantity')::int * COALESCE(p.cost_price, 0)), 0) as cost,
+         COALESCE(SUM((item->>'quantity')::int * COALESCE(${costCol}, 0)), 0) as cost,
          COALESCE(SUM(o.shipping_cost), 0) as shipping,
          0 as fees,
          SUM((item->>'quantity')::int * COALESCE((item->>'unit_price')::numeric, 0))
-           - COALESCE(SUM((item->>'quantity')::int * COALESCE(p.cost_price, 0)), 0) as net,
+           - COALESCE(SUM((item->>'quantity')::int * COALESCE(${costCol}, 0)), 0) as net,
          COUNT(DISTINCT o.id) as order_count
        FROM orders o,
             jsonb_array_elements(o.items) as item
@@ -155,9 +158,9 @@ export async function registerAnalyticsRoutes(app: FastifyInstance) {
          COALESCE(p.category, p.ml_category_id, 'Sem Categoria') as category_name,
          SUM((item->>'quantity')::int) as quantity_sold,
          SUM((item->>'quantity')::int * COALESCE((item->>'unit_price')::numeric, 0)) as revenue,
-         COALESCE(SUM((item->>'quantity')::int * COALESCE(p.cost_price, 0)), 0) as cost,
+         COALESCE(SUM((item->>'quantity')::int * COALESCE(${costCol}, 0)), 0) as cost,
          SUM((item->>'quantity')::int * COALESCE((item->>'unit_price')::numeric, 0))
-           - COALESCE(SUM((item->>'quantity')::int * COALESCE(p.cost_price, 0)), 0) as net,
+           - COALESCE(SUM((item->>'quantity')::int * COALESCE(${costCol}, 0)), 0) as net,
          COUNT(DISTINCT p.id) as product_count
        FROM orders o,
             jsonb_array_elements(o.items) as item

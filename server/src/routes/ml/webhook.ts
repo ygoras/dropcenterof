@@ -528,12 +528,12 @@ async function handleOrderNotification(credential: MlCredential, resource: strin
     let totalCostPrice = 0;
     for (const item of orderItems) {
       if (!item.product_id) continue;
-      const product = await queryOne<{ cost_price: number }>(
-        `SELECT cost_price FROM products WHERE id = $1`,
+      const product = await queryOne<{ sell_price: number }>(
+        `SELECT sell_price FROM products WHERE id = $1`,
         [item.product_id]
       );
       if (product) {
-        totalCostPrice += (product.cost_price || 0) * (item.quantity || 1);
+        totalCostPrice += (product.sell_price || 0) * (item.quantity || 1);
       }
     }
 
