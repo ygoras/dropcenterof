@@ -872,6 +872,26 @@ export async function registerAsaasPixRoutes(app: FastifyInstance) {
       );
 
       if (pendingPayments.length === 0) {
+        // No pending payments, but check if subscription is overdue with confirmed payments
+        // This handles the case where plan was changed but old expired charges keep status overdue
+        const confirmedPayment = await queryOne<{ subscription_id: string }>(
+          `SELECT p.subscription_id FROM payments p
+           JOIN subscriptions s ON s.id = p.subscription_id
+           WHERE p.tenant_id = $1 AND p.status = 'confirmed'
+             AND s.status IN ('overdue', 'blocked')
+           ORDER BY p.paid_at DESC LIMIT 1`,
+          [tenantId]
+        );
+
+        if (confirmedPayment?.subscription_id) {
+          await query(
+            `UPDATE subscriptions SET status = 'active', blocked_at = NULL, updated_at = NOW() WHERE id = $1`,
+            [confirmedPayment.subscription_id]
+          );
+          await query(`UPDATE profiles SET is_active = TRUE WHERE tenant_id = $1`, [tenantId]);
+          return reply.send({ synced: 1, message: 'Assinatura reativada — pagamento confirmado encontrado' });
+        }
+
         return reply.send({ synced: 0, message: 'Nenhum pagamento pendente encontrado' });
       }
 

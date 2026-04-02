@@ -158,6 +158,12 @@ async function handlePublish(cred: MlCredRow, tenantId: string, listingId: strin
   const product = listing.products;
   const listingAttrs = listing.attributes || {};
 
+  // Validate required fields
+  const categoryId = listing.category_id || product?.ml_category_id;
+  if (!categoryId) {
+    return reply.status(400).send({ error: 'Categoria ML é obrigatória para publicar o anúncio' });
+  }
+
   const listingTypeId = listingAttrs._listing_type_id || 'gold_pro';
   const itemCondition = listingAttrs._condition || product?.condition || 'new';
   const warrantyType = listingAttrs._warranty_type || product?.warranty_type || 'Garantia do vendedor';
@@ -175,7 +181,7 @@ async function handlePublish(cred: MlCredRow, tenantId: string, listingId: strin
 
   const mlPayload: Record<string, unknown> = {
     title: listing.title,
-    category_id: listing.category_id || product?.ml_category_id || 'MLB1000',
+    category_id: listing.category_id || product?.ml_category_id,
     price: listing.price,
     currency_id: 'BRL',
     available_quantity: Math.max(availableQty, 1),
@@ -196,6 +202,13 @@ async function handlePublish(cred: MlCredRow, tenantId: string, listingId: strin
     free_shipping: freeShipping,
   };
 
+  // Free shipping requires free_methods for national coverage
+  if (freeShipping) {
+    shippingObj.free_methods = [
+      { id: 73328, rule: { free_mode: 'country', value: null } },
+    ];
+  }
+
   if (product?.dimensions && product?.weight_kg) {
     const dims = product.dimensions as { height?: number; width?: number; length?: number };
     const h = dims.height || 10;
@@ -215,6 +228,18 @@ async function handlePublish(cred: MlCredRow, tenantId: string, listingId: strin
 
   if (sellerSku) {
     mlAttributes.push({ id: 'SELLER_SKU', value_name: sellerSku });
+  }
+
+  // BRAND — required by most ML categories
+  const brand = listingAttrs._brand || product?.brand;
+  if (brand) {
+    mlAttributes.push({ id: 'BRAND', value_name: String(brand) });
+  }
+
+  // GTIN/EAN — strongly recommended, increasingly required
+  const gtin = product?.gtin;
+  if (gtin) {
+    mlAttributes.push({ id: 'GTIN', value_name: String(gtin) });
   }
 
   if (listingAttrs && typeof listingAttrs === 'object') {

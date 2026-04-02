@@ -5,6 +5,12 @@ import { requireRole } from '../../middleware/rbac.js';
 import { validateBody } from '../../middleware/validateBody.js';
 import { queryMany, queryOne, query } from '../../lib/db.js';
 import { getTenantFilter } from '../../middleware/tenantScope.js';
+import { env } from '../../config/env.js';
+import { logger } from '../../lib/logger.js';
+
+const ASAAS_API = env.ASAAS_SANDBOX
+  ? 'https://sandbox.asaas.com/api/v3'
+  : 'https://api.asaas.com/v3';
 
 export async function registerSubscriptionRoutes(app: FastifyInstance) {
   // Get current subscription (seller)
@@ -83,12 +89,58 @@ export async function registerSubscriptionRoutes(app: FastifyInstance) {
     if (setClauses.length === 0) return reply.status(400).send({ error: 'Nada para atualizar' });
 
     params.push(subscriptionId);
-    const sub = await queryOne(
+    const sub = await queryOne<{ id: string; tenant_id: string; status: string }>(
       `UPDATE subscriptions SET ${setClauses.join(', ')}, updated_at = NOW() WHERE id = $${idx} RETURNING *`,
       params
     );
 
     if (!sub) return reply.status(404).send({ error: 'Assinatura não encontrada' });
-    return sub;
+
+    // When plan changes: cancel old pending/expired charges and reactivate subscription
+    if (plan_id) {
+      // Cancel old pending/expired payments in DB and Asaas
+      const oldPayments = await queryMany<{ id: string; payment_gateway_id: string | null; status: string }>(
+        `SELECT id, payment_gateway_id, status FROM payments
+         WHERE subscription_id = $1 AND status IN ('pending', 'expired')`,
+        [subscriptionId]
+      );
+
+      for (const payment of oldPayments) {
+        // Cancel in Asaas if has gateway ID
+        if (payment.payment_gateway_id && env.ASAAS_API_KEY) {
+          try {
+            await fetch(`${ASAAS_API}/payments/${payment.payment_gateway_id}`, {
+              method: 'DELETE',
+              headers: { access_token: env.ASAAS_API_KEY },
+            });
+          } catch (err) {
+            logger.warn({ paymentId: payment.payment_gateway_id }, 'Failed to cancel Asaas charge on plan change');
+          }
+        }
+        // Mark as expired in DB
+        await query(`UPDATE payments SET status = 'expired', notes = 'Cancelado — mudança de plano' WHERE id = $1`, [payment.id]);
+      }
+
+      // Reactivate subscription (plan was changed, old debts cleared)
+      await query(
+        `UPDATE subscriptions SET status = 'active', blocked_at = NULL, updated_at = NOW() WHERE id = $1`,
+        [subscriptionId]
+      );
+
+      // Reactivate profiles
+      if (sub.tenant_id) {
+        await query(`UPDATE profiles SET is_active = TRUE WHERE tenant_id = $1`, [sub.tenant_id]);
+      }
+
+      logger.info({ subscriptionId, oldPaymentsCancelled: oldPayments.length, newPlanId: plan_id }, 'Plan changed — old charges cancelled');
+    }
+
+    // Re-fetch updated subscription
+    const updated = await queryOne(
+      `SELECT * FROM subscriptions WHERE id = $1`,
+      [subscriptionId]
+    );
+
+    return updated;
   });
 }
