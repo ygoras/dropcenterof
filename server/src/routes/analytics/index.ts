@@ -52,22 +52,29 @@ export async function registerAnalyticsRoutes(app: FastifyInstance) {
     preHandler: [authMiddleware],
   }, async (request) => {
     const { tenantId, isAdmin } = getTenantFilter(request);
-    const query = request.query as { dateRange?: string; tenantId?: string; categoryId?: string };
+    const qs = request.query as { dateRange?: string; tenantId?: string; categoryId?: string };
 
-    const dateRange = query.dateRange || '30d';
-    const filterTenantId = query.tenantId && query.tenantId !== 'all' ? query.tenantId : null;
-    const filterCategoryId = query.categoryId && query.categoryId !== 'all' ? query.categoryId : null;
+    const dateRange = qs.dateRange || '30d';
+    const filterTenantId = qs.tenantId && qs.tenantId !== 'all' ? qs.tenantId : null;
+    const filterCategoryId = qs.categoryId && qs.categoryId !== 'all' ? qs.categoryId : null;
+
+    // Build parameterized conditions
+    const conditions: string[] = ['1=1'];
+    const params: unknown[] = [];
 
     // Date filter
-    let dateCondition = '';
-    if (dateRange === '7d') dateCondition = `AND o.created_at >= NOW() - INTERVAL '7 days'`;
-    else if (dateRange === '30d') dateCondition = `AND o.created_at >= NOW() - INTERVAL '30 days'`;
-    else if (dateRange === '90d') dateCondition = `AND o.created_at >= NOW() - INTERVAL '90 days'`;
+    if (dateRange === '7d') conditions.push(`o.created_at >= NOW() - INTERVAL '7 days'`);
+    else if (dateRange === '30d') conditions.push(`o.created_at >= NOW() - INTERVAL '30 days'`);
+    else if (dateRange === '90d') conditions.push(`o.created_at >= NOW() - INTERVAL '90 days'`);
 
-    // Tenant filter
-    let tenantCondition = '';
-    if (!isAdmin && tenantId) tenantCondition = `AND o.tenant_id = '${tenantId}'`;
-    else if (filterTenantId) tenantCondition = `AND o.tenant_id = '${filterTenantId}'`;
+    // Tenant filter (parameterized)
+    const effectiveTenantId = (!isAdmin && tenantId) ? tenantId : filterTenantId;
+    if (effectiveTenantId) {
+      params.push(effectiveTenantId);
+      conditions.push(`o.tenant_id = $${params.length}`);
+    }
+
+    const where = conditions.join(' AND ');
 
     // Sales by seller
     const salesBySeller = await queryMany(
@@ -80,9 +87,10 @@ export async function registerAnalyticsRoutes(app: FastifyInstance) {
               0 as items_sold
        FROM orders o
        JOIN tenants t ON t.id = o.tenant_id
-       WHERE 1=1 ${dateCondition} ${tenantCondition}
+       WHERE ${where}
        GROUP BY o.tenant_id, t.name
-       ORDER BY total_revenue DESC`
+       ORDER BY total_revenue DESC`,
+      params
     );
 
     // Daily trend
@@ -92,9 +100,10 @@ export async function registerAnalyticsRoutes(app: FastifyInstance) {
               COUNT(*) as orders,
               COALESCE(SUM(o.total), 0) as net
        FROM orders o
-       WHERE 1=1 ${dateCondition} ${tenantCondition}
+       WHERE ${where}
        GROUP BY DATE(o.created_at)
-       ORDER BY date`
+       ORDER BY date`,
+      params
     );
 
     // Totals
@@ -105,13 +114,64 @@ export async function registerAnalyticsRoutes(app: FastifyInstance) {
               COUNT(*) as orders, 0 as items_sold,
               CASE WHEN COUNT(*) > 0 THEN COALESCE(SUM(total), 0) / COUNT(*) ELSE 0 END as avg_ticket
        FROM orders o
-       WHERE 1=1 ${dateCondition} ${tenantCondition}`
+       WHERE ${where}`,
+      params
+    );
+
+    // Sales by SKU — unnest JSONB items array
+    const skuParams = [...params];
+    let skuCategoryCondition = '';
+    if (filterCategoryId) {
+      skuParams.push(filterCategoryId);
+      skuCategoryCondition = `AND COALESCE(p.category, p.ml_category_id) = $${skuParams.length}`;
+    }
+
+    const salesBySku = await queryMany(
+      `SELECT
+         COALESCE(item->>'sku', 'SEM-SKU') as sku,
+         COALESCE(item->>'product_name', 'Produto') as product_name,
+         SUM((item->>'quantity')::int) as quantity_sold,
+         SUM((item->>'quantity')::int * COALESCE((item->>'unit_price')::numeric, 0)) as revenue,
+         COALESCE(SUM((item->>'quantity')::int * COALESCE(p.cost_price, 0)), 0) as cost,
+         COALESCE(SUM(o.shipping_cost), 0) as shipping,
+         0 as fees,
+         SUM((item->>'quantity')::int * COALESCE((item->>'unit_price')::numeric, 0))
+           - COALESCE(SUM((item->>'quantity')::int * COALESCE(p.cost_price, 0)), 0) as net,
+         COUNT(DISTINCT o.id) as order_count
+       FROM orders o,
+            jsonb_array_elements(o.items) as item
+       LEFT JOIN products p ON p.id = (item->>'product_id')::uuid
+       WHERE ${where} ${skuCategoryCondition}
+       GROUP BY item->>'sku', item->>'product_name'
+       ORDER BY revenue DESC
+       LIMIT 100`,
+      skuParams
+    );
+
+    // Sales by category
+    const salesByCategory = await queryMany(
+      `SELECT
+         COALESCE(p.category, p.ml_category_id, 'Sem Categoria') as category_id,
+         COALESCE(p.category, p.ml_category_id, 'Sem Categoria') as category_name,
+         SUM((item->>'quantity')::int) as quantity_sold,
+         SUM((item->>'quantity')::int * COALESCE((item->>'unit_price')::numeric, 0)) as revenue,
+         COALESCE(SUM((item->>'quantity')::int * COALESCE(p.cost_price, 0)), 0) as cost,
+         SUM((item->>'quantity')::int * COALESCE((item->>'unit_price')::numeric, 0))
+           - COALESCE(SUM((item->>'quantity')::int * COALESCE(p.cost_price, 0)), 0) as net,
+         COUNT(DISTINCT p.id) as product_count
+       FROM orders o,
+            jsonb_array_elements(o.items) as item
+       LEFT JOIN products p ON p.id = (item->>'product_id')::uuid
+       WHERE ${where}
+       GROUP BY category_id, category_name
+       ORDER BY revenue DESC`,
+      params
     );
 
     return {
       salesBySeller,
-      salesBySku: [],
-      salesByCategory: [],
+      salesBySku,
+      salesByCategory,
       productivity: [],
       operatorProductivity: [],
       dailyTrend,

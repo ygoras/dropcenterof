@@ -86,7 +86,7 @@ const pixActionSchema = z.object({
     'generate_pix', 'generate_plan_charge', 'generate_subscription_pix',
     'get_balance', 'get_transactions', 'get_spending_forecast',
     'check_charge_status', 'cleanup_duplicates', 'sync_pending_charges',
-    'cancel_charge', 'reopen_pix',
+    'cancel_charge', 'reopen_pix', 'sync_subscription_status',
   ]),
   amount: z.number().min(1).max(50000).optional(),
   tenant_id: z.string().uuid().optional(),
@@ -845,6 +845,88 @@ export async function registerAsaasPixRoutes(app: FastifyInstance) {
         amount: tx.amount,
         reference_id,
       });
+    }
+
+    // ─── ACTION: sync_subscription_status ─────────────────────
+    // Checks Asaas for actual payment status of subscription payments.
+    // If paid but webhook was missed: updates payment + subscription to active.
+
+    if (action === 'sync_subscription_status') {
+      const tenantId = body.tenant_id || user.tenantId;
+      if (!tenantId) {
+        return reply.status(400).send({ error: 'tenant_id é obrigatório' });
+      }
+
+      // Find pending/expired subscription payments
+      const pendingPayments = await queryMany<{
+        id: string; amount: number; payment_gateway_id: string; subscription_id: string; status: string;
+      }>(
+        `SELECT p.id, p.amount, p.payment_gateway_id, p.subscription_id, p.status
+         FROM payments p
+         WHERE p.tenant_id = $1
+           AND p.status IN ('pending', 'expired')
+           AND p.payment_gateway_id IS NOT NULL
+         ORDER BY p.created_at DESC
+         LIMIT 10`,
+        [tenantId]
+      );
+
+      if (pendingPayments.length === 0) {
+        return reply.send({ synced: 0, message: 'Nenhum pagamento pendente encontrado' });
+      }
+
+      let synced = 0;
+      const results: { id: string; asaas_status: string; action: string }[] = [];
+
+      for (const payment of pendingPayments) {
+        try {
+          const asaasRes = await fetch(`${ASAAS_API}/payments/${payment.payment_gateway_id}`, {
+            headers: { access_token: env.ASAAS_API_KEY },
+          });
+
+          if (!asaasRes.ok) {
+            results.push({ id: payment.payment_gateway_id, asaas_status: 'fetch_error', action: 'skipped' });
+            continue;
+          }
+
+          const asaasData: any = await asaasRes.json();
+          const asaasStatus = asaasData.status as string;
+
+          if (asaasStatus === 'CONFIRMED' || asaasStatus === 'RECEIVED') {
+            // Payment confirmed in Asaas — update local DB
+            await query(
+              `UPDATE payments SET status = 'confirmed', paid_at = NOW() WHERE id = $1`,
+              [payment.id]
+            );
+
+            // Reactivate subscription
+            if (payment.subscription_id) {
+              await query(
+                `UPDATE subscriptions SET status = 'active', blocked_at = NULL, updated_at = NOW() WHERE id = $1`,
+                [payment.subscription_id]
+              );
+            }
+
+            // Reactivate seller profiles
+            await query(
+              `UPDATE profiles SET is_active = TRUE WHERE tenant_id = $1`,
+              [tenantId]
+            );
+
+            synced++;
+            results.push({ id: payment.payment_gateway_id, asaas_status: asaasStatus, action: 'confirmed' });
+          } else if (asaasStatus === 'OVERDUE' || asaasStatus === 'DELETED' || asaasStatus === 'REFUNDED') {
+            await query(`UPDATE payments SET status = 'expired' WHERE id = $1`, [payment.id]);
+            results.push({ id: payment.payment_gateway_id, asaas_status: asaasStatus, action: 'marked_expired' });
+          } else {
+            results.push({ id: payment.payment_gateway_id, asaas_status: asaasStatus, action: 'still_pending' });
+          }
+        } catch (err) {
+          results.push({ id: payment.payment_gateway_id, asaas_status: 'error', action: 'skipped' });
+        }
+      }
+
+      return reply.send({ synced, details: results });
     }
 
     return reply.status(400).send({ error: 'Ação inválida' });

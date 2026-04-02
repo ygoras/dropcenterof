@@ -50,6 +50,19 @@ const orderStatusFlow: Record<string, { label: string; badgeStatus: string; icon
 
 import { useMlCredentials } from "@/hooks/useMlCredentials";
 
+const mlStatusLabels: Record<string, string> = {
+  confirmed: "Confirmado",
+  paid: "Pago",
+  payment_required: "Pgto. Pendente",
+  payment_in_process: "Pgto. em Processo",
+  partially_paid: "Pgto. Parcial",
+  partially_refunded: "Reembolso Parcial",
+  pending_cancel: "Cancelamento Pendente",
+  cancelled: "Cancelado",
+  shipped: "Enviado",
+  delivered: "Entregue",
+};
+
 const SellerPedidos = () => {
   const { orders, loading } = useOrders();
   const { credentials } = useMlCredentials();
@@ -183,6 +196,7 @@ const SellerPedidos = () => {
                    <th className="text-left py-3 px-4 text-muted-foreground font-medium">Itens</th>
                    <th className="text-left py-3 px-4 text-muted-foreground font-medium">Total</th>
                    <th className="text-left py-3 px-4 text-muted-foreground font-medium">Status</th>
+                   <th className="text-left py-3 px-4 text-muted-foreground font-medium">Status ML</th>
                    <th className="text-left py-3 px-4 text-muted-foreground font-medium">Rastreio</th>
                    <th className="text-left py-3 px-4 text-muted-foreground font-medium">Data</th>
                    <th className="text-right py-3 px-4 text-muted-foreground font-medium">Ações</th>
@@ -208,6 +222,15 @@ const SellerPedidos = () => {
                       <td className="py-3 px-4 font-semibold text-foreground">{formatCurrency(order.total)}</td>
                       <td className="py-3 px-4">
                         <StatusBadge status={config.badgeStatus} label={config.label} />
+                      </td>
+                      <td className="py-3 px-4">
+                        {order.ml_status ? (
+                          <span className="text-xs font-medium text-muted-foreground bg-secondary/50 px-2 py-0.5 rounded-full">
+                            {mlStatusLabels[order.ml_status] || order.ml_status}
+                          </span>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">—</span>
+                        )}
                       </td>
                       <td className="py-3 px-4">
                         {order.tracking_code ? (

@@ -90,6 +90,23 @@ const SellerPlano = () => {
   const [hasPendingRequest, setHasPendingRequest] = useState(false);
   const [lastRequestDate, setLastRequestDate] = useState<Date | null>(null);
   const [changeRestrictionChecked, setChangeRestrictionChecked] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+
+  const syncSubscriptionStatus = useCallback(async () => {
+    if (!profile?.tenant_id) return false;
+    setSyncing(true);
+    try {
+      const res = await api.post<{ synced: number }>("/api/payments/pix", {
+        action: "sync_subscription_status",
+        tenant_id: profile.tenant_id,
+      });
+      return (res?.synced ?? 0) > 0;
+    } catch {
+      return false;
+    } finally {
+      setSyncing(false);
+    }
+  }, [profile?.tenant_id]);
 
   const fetchData = useCallback(async () => {
     if (!profile?.tenant_id) return;
@@ -104,6 +121,25 @@ const SellerPlano = () => {
     // API returns array, we need the first (most recent) subscription
     const subData = Array.isArray(subRes) ? subRes[0] ?? null : subRes ?? null;
 
+    // Auto-sync: if subscription is overdue, check Asaas for missed payments
+    if (subData?.status === 'overdue') {
+      const synced = await syncSubscriptionStatus();
+      if (synced) {
+        // Re-fetch subscription after sync
+        const freshSub = await api.get<any>(`/api/subscriptions?tenant_id=${profile.tenant_id}`);
+        const freshData = Array.isArray(freshSub) ? freshSub[0] ?? null : freshSub ?? null;
+        setSubscription(freshData);
+        if (freshData?.plan_id) {
+          setPlan(plansData?.find((p) => p.id === freshData.plan_id) ?? null);
+        }
+        toast({ title: "Pagamento sincronizado!", description: "Sua assinatura foi reativada." });
+        const paymentsData = await api.get<SellerPayment[]>(`/api/payments?tenant_id=${profile.tenant_id}&limit=12&order=due_date.desc`);
+        setPayments(paymentsData ?? []);
+        setLoading(false);
+        return;
+      }
+    }
+
     setSubscription(subData);
 
     if (subData?.plan_id) {
@@ -115,7 +151,7 @@ const SellerPlano = () => {
 
     setPayments(paymentsData ?? []);
     setLoading(false);
-  }, [profile?.tenant_id]);
+  }, [profile?.tenant_id, syncSubscriptionStatus]);
 
   // Check if seller has a pending request or is within 90-day cooldown
   const checkChangeRestrictions = useCallback(async () => {
@@ -294,18 +330,39 @@ const SellerPlano = () => {
                 {plan ? `Plano ${plan.name} — ${formatCurrency(plan.price)}/mês` : 'Gere o PIX para ativar seu acesso'}
               </p>
             </div>
-            <Button
-              onClick={handleGenerateSubscriptionPix}
-              disabled={generatingSubPix}
-              className="gap-2"
-            >
-              {generatingSubPix ? (
-                <RefreshCw className="w-4 h-4 animate-spin" />
-              ) : (
-                <QrCode className="w-4 h-4" />
+            <div className="flex items-center gap-2">
+              {subscription.status === 'overdue' && (
+                <Button
+                  variant="outline"
+                  onClick={async () => {
+                    const synced = await syncSubscriptionStatus();
+                    if (synced) {
+                      toast({ title: "Pagamento sincronizado!", description: "Sua assinatura foi reativada." });
+                      fetchData();
+                    } else {
+                      toast({ title: "Nenhum pagamento confirmado", description: "Verifique se o PIX foi pago.", variant: "destructive" });
+                    }
+                  }}
+                  disabled={syncing}
+                  className="gap-2"
+                >
+                  <RefreshCw className={`w-4 h-4 ${syncing ? 'animate-spin' : ''}`} />
+                  {syncing ? 'Sincronizando...' : 'Já paguei'}
+                </Button>
               )}
-              Gerar PIX
-            </Button>
+              <Button
+                onClick={handleGenerateSubscriptionPix}
+                disabled={generatingSubPix}
+                className="gap-2"
+              >
+                {generatingSubPix ? (
+                  <RefreshCw className="w-4 h-4 animate-spin" />
+                ) : (
+                  <QrCode className="w-4 h-4" />
+                )}
+                Gerar PIX
+              </Button>
+            </div>
           </CardContent>
         </Card>
       )}

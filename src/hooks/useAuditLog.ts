@@ -14,27 +14,53 @@ export interface AuditEntry {
   user_email?: string;
 }
 
-export function useAuditLog(limit = 100) {
+interface AuditResponse {
+  data: AuditEntry[];
+  total: number;
+}
+
+export function useAuditLog(pageSize = 20) {
   const [entries, setEntries] = useState<AuditEntry[]>([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
+  const [entityTypeFilter, setEntityTypeFilter] = useState("");
+  const [actionFilter, setActionFilter] = useState("");
+
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
   const fetchLogs = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await api.get<AuditEntry[]>(`/api/audit?limit=${limit}`);
-      setEntries(data);
+      const offset = (page - 1) * pageSize;
+      let url = `/api/audit?limit=${pageSize}&offset=${offset}`;
+      if (entityTypeFilter) url += `&entity_type=${entityTypeFilter}`;
+      if (actionFilter) url += `&action=${actionFilter}`;
+
+      const res = await api.get<AuditResponse>(url);
+      setEntries(res?.data ?? []);
+      setTotal(res?.total ?? 0);
     } catch {
       // ignore
     } finally {
       setLoading(false);
     }
-  }, [limit]);
+  }, [page, pageSize, entityTypeFilter, actionFilter]);
 
   useEffect(() => {
     fetchLogs();
   }, [fetchLogs]);
 
-  return { entries, loading, refetch: fetchLogs };
+  // Reset to page 1 when filters change
+  const setEntityType = useCallback((v: string) => { setEntityTypeFilter(v); setPage(1); }, []);
+  const setAction = useCallback((v: string) => { setActionFilter(v); setPage(1); }, []);
+
+  return {
+    entries, loading, total, page, setPage, totalPages,
+    entityTypeFilter, setEntityTypeFilter: setEntityType,
+    actionFilter, setActionFilter: setAction,
+    refetch: fetchLogs,
+  };
 }
 
 export async function logAudit(action: string, entityType: string, entityId?: string, details?: Record<string, unknown>) {

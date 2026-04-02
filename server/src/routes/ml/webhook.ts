@@ -401,13 +401,7 @@ async function handleOrderNotification(credential: MlCredential, resource: strin
   // 5. Generate order number
   const orderNumber = `ML-${mlOrderId}`;
 
-  // 6. Check if order already exists
-  const existingOrder = await queryOne<{ id: string; status: string }>(
-    `SELECT id, status FROM orders WHERE ml_order_id = $1 AND tenant_id = $2 LIMIT 1`,
-    [String(mlOrderId), credential.tenant_id]
-  );
-
-  // Build order payload
+  // 6. Build order payload
   const orderPayload = {
     tenant_id: credential.tenant_id,
     order_number: orderNumber,
@@ -424,10 +418,11 @@ async function handleOrderNotification(credential: MlCredential, resource: strin
     tracking_code: trackingCode,
     ml_order_id: String(mlOrderId),
     ml_credential_id: credential.id,
+    ml_status: orderData.status || null,
     notes: `Pedido originado do Mercado Livre. Pack ID: ${orderData.pack_id || 'N/A'}`,
   };
 
-  // FIX: Apply shipment status AFTER orderPayload is created
+  // Apply shipment status
   if (orderData.shipping?.id) {
     try {
       const shipRes = await fetch(`${ML_API}/shipments/${orderData.shipping.id}`, {
@@ -452,64 +447,84 @@ async function handleOrderNotification(credential: MlCredential, resource: strin
     }
   }
 
-  if (existingOrder) {
-    // Update existing order - don't regress status
-    const statusPriority: Record<string, number> = {
-      pending: 0, pending_credit: 1, approved: 2, invoiced: 3,
-      picking: 4, packing: 5, packed: 6, shipped: 7, delivered: 8, cancelled: 9,
-    };
+  // Status priority map for conflict resolution
+  const statusPriority: Record<string, number> = {
+    pending: 0, pending_credit: 1, approved: 2, invoiced: 3,
+    picking: 4, packing: 5, packed: 6, shipped: 7, delivered: 8, cancelled: 9,
+  };
 
-    const currentPriority = statusPriority[existingOrder.status] ?? 0;
-    const newPriority = statusPriority[orderPayload.status] ?? 0;
+  // 7. UPSERT: Insert or update order atomically (prevents duplicates)
+  const upsertResult = await queryOne<{ id: string; is_new: boolean; final_status: string }>(
+    `INSERT INTO orders (
+      tenant_id, order_number, customer_name, customer_document, customer_email, customer_phone,
+      status, items, subtotal, shipping_cost, total, shipping_address, tracking_code,
+      ml_order_id, ml_credential_id, notes, ml_status, created_at, updated_at
+    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,NOW())
+    ON CONFLICT (ml_order_id, tenant_id) DO UPDATE SET
+      customer_name = EXCLUDED.customer_name,
+      customer_document = EXCLUDED.customer_document,
+      customer_email = EXCLUDED.customer_email,
+      customer_phone = EXCLUDED.customer_phone,
+      status = CASE
+        WHEN EXCLUDED.status = 'cancelled' THEN 'cancelled'
+        WHEN EXCLUDED.status = 'delivered' THEN 'delivered'
+        WHEN EXCLUDED.status = 'shipped' AND orders.status NOT IN ('delivered', 'cancelled') THEN 'shipped'
+        WHEN (
+          CASE EXCLUDED.status
+            WHEN 'pending' THEN 0 WHEN 'pending_credit' THEN 1 WHEN 'approved' THEN 2
+            WHEN 'invoiced' THEN 3 WHEN 'picking' THEN 4 WHEN 'packing' THEN 5
+            WHEN 'packed' THEN 6 WHEN 'shipped' THEN 7 WHEN 'delivered' THEN 8 WHEN 'cancelled' THEN 9
+            ELSE 0
+          END
+        ) >= (
+          CASE orders.status
+            WHEN 'pending' THEN 0 WHEN 'pending_credit' THEN 1 WHEN 'approved' THEN 2
+            WHEN 'invoiced' THEN 3 WHEN 'picking' THEN 4 WHEN 'packing' THEN 5
+            WHEN 'packed' THEN 6 WHEN 'shipped' THEN 7 WHEN 'delivered' THEN 8 WHEN 'cancelled' THEN 9
+            ELSE 0
+          END
+        ) THEN EXCLUDED.status
+        ELSE orders.status
+      END,
+      items = EXCLUDED.items,
+      subtotal = EXCLUDED.subtotal,
+      shipping_cost = EXCLUDED.shipping_cost,
+      total = EXCLUDED.total,
+      shipping_address = EXCLUDED.shipping_address,
+      tracking_code = COALESCE(EXCLUDED.tracking_code, orders.tracking_code),
+      notes = EXCLUDED.notes,
+      ml_status = COALESCE(EXCLUDED.ml_status, orders.ml_status),
+      updated_at = NOW()
+    RETURNING id, (xmax = 0) AS is_new, status AS final_status`,
+    [
+      orderPayload.tenant_id, orderPayload.order_number,
+      orderPayload.customer_name, orderPayload.customer_document,
+      orderPayload.customer_email, orderPayload.customer_phone,
+      orderPayload.status, JSON.stringify(orderPayload.items),
+      orderPayload.subtotal, orderPayload.shipping_cost, orderPayload.total,
+      orderPayload.shipping_address ? JSON.stringify(orderPayload.shipping_address) : null,
+      orderPayload.tracking_code, orderPayload.ml_order_id,
+      orderPayload.ml_credential_id, orderPayload.notes,
+      orderPayload.ml_status,
+      orderData.date_created || new Date().toISOString(),
+    ]
+  );
 
-    const finalStatus =
-      orderPayload.status === 'cancelled' || newPriority >= currentPriority
-        ? orderPayload.status
-        : existingOrder.status;
+  const isNewOrder = upsertResult?.is_new ?? false;
+  const orderId = upsertResult?.id;
+  const finalStatus = upsertResult?.final_status ?? orderPayload.status;
 
-    await query(
-      `UPDATE orders SET
-        customer_name = $1, customer_document = $2, customer_email = $3, customer_phone = $4,
-        status = $5, items = $6, subtotal = $7, shipping_cost = $8, total = $9,
-        shipping_address = $10, tracking_code = $11, notes = $12, updated_at = NOW()
-       WHERE id = $13`,
-      [
-        orderPayload.customer_name, orderPayload.customer_document,
-        orderPayload.customer_email, orderPayload.customer_phone,
-        finalStatus, JSON.stringify(orderPayload.items),
-        orderPayload.subtotal, orderPayload.shipping_cost, orderPayload.total,
-        orderPayload.shipping_address ? JSON.stringify(orderPayload.shipping_address) : null,
-        orderPayload.tracking_code, orderPayload.notes, existingOrder.id,
-      ]
-    );
-
-    logger.info({ orderId: existingOrder.id, finalStatus }, 'Updated existing order');
+  if (isNewOrder) {
+    logger.info({ orderNumber, orderId, tenantId: credential.tenant_id }, 'Created new order');
   } else {
-    // Insert new order
-    await query(
-      `INSERT INTO orders (
-        tenant_id, order_number, customer_name, customer_document, customer_email, customer_phone,
-        status, items, subtotal, shipping_cost, total, shipping_address, tracking_code,
-        ml_order_id, ml_credential_id, notes, created_at, updated_at
-       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,NOW())`,
-      [
-        orderPayload.tenant_id, orderPayload.order_number,
-        orderPayload.customer_name, orderPayload.customer_document,
-        orderPayload.customer_email, orderPayload.customer_phone,
-        orderPayload.status, JSON.stringify(orderPayload.items),
-        orderPayload.subtotal, orderPayload.shipping_cost, orderPayload.total,
-        orderPayload.shipping_address ? JSON.stringify(orderPayload.shipping_address) : null,
-        orderPayload.tracking_code, orderPayload.ml_order_id,
-        orderPayload.ml_credential_id, orderPayload.notes,
-        orderData.date_created || new Date().toISOString(),
-      ]
-    );
-
-    logger.info({ orderNumber, tenantId: credential.tenant_id }, 'Created new order');
+    logger.info({ orderId, finalStatus }, 'Updated existing order');
   }
 
-  // 7. CREDIT CHECK: For approved orders, verify seller has enough credit
-  if (mappedStatus === 'approved' && !existingOrder) {
+  // Update mappedStatus to reflect what was actually saved
+  mappedStatus = finalStatus;
+
+  // 8. CREDIT CHECK: For approved NEW orders, verify seller has enough credit
+  if (mappedStatus === 'approved' && isNewOrder) {
     let totalCostPrice = 0;
     for (const item of orderItems) {
       if (!item.product_id) continue;
@@ -567,8 +582,8 @@ async function handleOrderNotification(credential: MlCredential, resource: strin
     }
   }
 
-  // 8. Update stock (reserve) for approved orders (NOT pending_credit)
-  if (mappedStatus === 'approved' && !existingOrder) {
+  // 9. Update stock (reserve) for approved NEW orders (NOT pending_credit)
+  if (mappedStatus === 'approved' && isNewOrder) {
     for (const item of orderItems) {
       if (!item.product_id) continue;
 
@@ -595,43 +610,36 @@ async function handleOrderNotification(credential: MlCredential, resource: strin
     }
   }
 
-  // 9. Auto-create picking_task for approved orders (NOT pending_credit)
-  if (mappedStatus === 'approved') {
-    const orderRow = await queryOne<{ id: string }>(
-      `SELECT id FROM orders WHERE ml_order_id = $1 AND tenant_id = $2 LIMIT 1`,
-      [String(mlOrderId), credential.tenant_id]
+  // 10. Auto-create picking_task for approved orders (NOT pending_credit)
+  if (mappedStatus === 'approved' && orderId) {
+    // Create picking task if not exists
+    const existingTask = await queryOne<{ id: string }>(
+      `SELECT id FROM picking_tasks WHERE order_id = $1 LIMIT 1`,
+      [orderId]
     );
 
-    if (orderRow) {
-      // Create picking task if not exists
-      const existingTask = await queryOne<{ id: string }>(
-        `SELECT id FROM picking_tasks WHERE order_id = $1 LIMIT 1`,
-        [orderRow.id]
+    if (!existingTask) {
+      await query(
+        `INSERT INTO picking_tasks (order_id, status) VALUES ($1, 'pending')`,
+        [orderId]
+      );
+      logger.info({ orderId }, 'Auto-created picking task');
+    }
+
+    // Also create shipment record if shipping info available
+    if (orderData.shipping?.id) {
+      const existingShipment = await queryOne<{ id: string }>(
+        `SELECT id FROM shipments WHERE order_id = $1 LIMIT 1`,
+        [orderId]
       );
 
-      if (!existingTask) {
+      if (!existingShipment) {
         await query(
-          `INSERT INTO picking_tasks (order_id, status) VALUES ($1, 'pending')`,
-          [orderRow.id]
+          `INSERT INTO shipments (order_id, tenant_id, carrier, tracking_code, status, ml_shipment_id)
+           VALUES ($1, $2, $3, $4, 'pending', $5)`,
+          [orderId, credential.tenant_id, 'Mercado Envios', trackingCode, String(orderData.shipping.id)]
         );
-        logger.info({ orderId: orderRow.id }, 'Auto-created picking task');
-      }
-
-      // Also create shipment record if shipping info available
-      if (orderData.shipping?.id) {
-        const existingShipment = await queryOne<{ id: string }>(
-          `SELECT id FROM shipments WHERE order_id = $1 LIMIT 1`,
-          [orderRow.id]
-        );
-
-        if (!existingShipment) {
-          await query(
-            `INSERT INTO shipments (order_id, tenant_id, carrier, tracking_code, status, ml_shipment_id)
-             VALUES ($1, $2, $3, $4, 'pending', $5)`,
-            [orderRow.id, credential.tenant_id, 'Mercado Envios', trackingCode, String(orderData.shipping.id)]
-          );
-          logger.info({ orderId: orderRow.id, mlShipmentId: orderData.shipping.id }, 'Auto-created shipment');
-        }
+        logger.info({ orderId, mlShipmentId: orderData.shipping.id }, 'Auto-created shipment');
       }
     }
   }
