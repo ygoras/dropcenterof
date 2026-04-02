@@ -209,7 +209,7 @@ export async function registerProductRoutes(app: FastifyInstance) {
     // Fields that need JSON.stringify
     const jsonFields = new Set(['images', 'dimensions', 'attributes']);
     // Fields that are NOT columns in the products table
-    const skipFields = new Set(['initial_stock', 'min_stock', 'ml_listing_quantity', 'warranty_type', 'warranty_time']);
+    const skipFields = new Set(['initial_stock', 'min_stock', 'ml_listing_quantity', 'warranty_type', 'warranty_time', 'updated_at', 'created_at', 'id', 'tenant_id']);
 
     const setClauses: string[] = [];
     const params: unknown[] = [];
