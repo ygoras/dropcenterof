@@ -5,6 +5,9 @@ import { requireRole } from '../../middleware/rbac.js';
 import { validateBody } from '../../middleware/validateBody.js';
 import { queryMany, queryOne, query } from '../../lib/db.js';
 import { getTenantFilter } from '../../middleware/tenantScope.js';
+import { logger } from '../../lib/logger.js';
+
+const ML_API = 'https://api.mercadolibre.com';
 
 const createProductSchema = z.object({
   name: z.string().min(1),
@@ -284,6 +287,55 @@ export async function registerProductRoutes(app: FastifyInstance) {
     );
 
     if (!product) return reply.status(404).send({ error: 'Produto não encontrado' });
+
+    // Auto-pause/reactivate ML listings when product status changes
+    if (body.status === 'inactive' || body.status === 'active') {
+      const targetMlStatus = body.status === 'inactive' ? 'paused' : 'active';
+      const currentMlStatus = body.status === 'inactive' ? 'active' : 'paused';
+
+      const listings = await queryMany<{ id: string; ml_item_id: string; ml_credential_id: string }>(
+        `SELECT l.id, l.ml_item_id, l.ml_credential_id
+         FROM ml_listings l
+         WHERE l.product_id = $1 AND l.status = $2 AND l.ml_item_id IS NOT NULL`,
+        [productId, currentMlStatus]
+      );
+
+      for (const listing of listings) {
+        // Get ML access token for this listing's credential
+        const cred = await queryOne<{ access_token: string }>(
+          `SELECT access_token FROM ml_credentials WHERE id = $1`,
+          [listing.ml_credential_id]
+        );
+
+        if (cred?.access_token) {
+          try {
+            const mlRes = await fetch(`${ML_API}/items/${listing.ml_item_id}`, {
+              method: 'PUT',
+              headers: {
+                Authorization: `Bearer ${cred.access_token}`,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({ status: targetMlStatus }),
+            });
+
+            if (mlRes.ok) {
+              await query(
+                `UPDATE ml_listings SET status = $1, updated_at = NOW() WHERE id = $2`,
+                [targetMlStatus, listing.id]
+              );
+            } else {
+              logger.warn({ listingId: listing.id, mlItemId: listing.ml_item_id, status: mlRes.status }, 'Failed to update ML listing status');
+            }
+          } catch (err) {
+            logger.warn({ listingId: listing.id, err }, 'ML listing status update error');
+          }
+        }
+      }
+
+      if (listings.length > 0) {
+        logger.info({ productId, action: targetMlStatus, count: listings.length }, 'ML listings auto-updated on product status change');
+      }
+    }
 
     // Update stock if initial_stock or min_stock provided
     if (body.initial_stock !== undefined || body.min_stock !== undefined) {
