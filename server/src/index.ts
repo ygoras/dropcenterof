@@ -98,10 +98,43 @@ async function start() {
 
   // Frontend calls /api/payments but backend has /api/payments/pix only — return empty for list
   app.get('/api/payments', { preHandler: [authMiddleware] }, async (request) => {
-    const { tenantId } = getTenantFilter(request);
+    const { tenantId, isAdmin } = getTenantFilter(request);
+    const qs = request.query as { tenant_id?: string; limit?: string };
+    const limitVal = Math.min(parseInt(qs.limit ?? '50'), 200);
+
+    if (isAdmin) {
+      // Admin: return all payments with seller info
+      const filterTenant = qs.tenant_id || null;
+      const conditions: string[] = [];
+      const params: unknown[] = [];
+
+      if (filterTenant) {
+        params.push(filterTenant);
+        conditions.push(`p.tenant_id = $${params.length}`);
+      }
+
+      const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+      params.push(limitVal);
+
+      return queryMany(
+        `SELECT p.*, t.name as tenant_name, pr.name as seller_name, pr.email as seller_email,
+                pl.name as plan_name, s.status as subscription_status
+         FROM payments p
+         LEFT JOIN subscriptions s ON s.id = p.subscription_id
+         LEFT JOIN tenants t ON t.id = p.tenant_id
+         LEFT JOIN profiles pr ON pr.tenant_id = p.tenant_id
+         LEFT JOIN plans pl ON pl.id = s.plan_id
+         ${whereClause}
+         ORDER BY p.created_at DESC
+         LIMIT $${params.length}`,
+        params
+      );
+    }
+
+    // Seller: return own payments only
     return queryMany(
-      `SELECT * FROM payments WHERE tenant_id = $1 ORDER BY created_at DESC LIMIT 50`,
-      [tenantId]
+      `SELECT * FROM payments WHERE tenant_id = $1 ORDER BY created_at DESC LIMIT $2`,
+      [tenantId, limitVal]
     );
   });
 
