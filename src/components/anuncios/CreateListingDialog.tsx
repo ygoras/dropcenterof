@@ -259,7 +259,7 @@ export function CreateListingDialog({
             {showCalculator && selectedProd ? (
               <div className="mb-3 p-3 rounded-lg border border-primary/20 bg-primary/5">
                 <MlPriceCalculator
-                  basePrice={selectedProd.cost_price}
+                  basePrice={selectedProd.sell_price}
                   onFinalPriceChange={(price) => setListingPrice(price.toFixed(2))}
                   compact
                   listingType={listingType}
