@@ -43,7 +43,7 @@ export function EditPriceDialog({
 
   const listing = listings.find((l) => l.id === listingId);
   const product = listing ? products.find((p) => p.id === listing.product_id) : null;
-  const costPrice = product?.cost_price || 0;
+  const costPrice = product?.sell_price || 0;
   const listingTypeId = (listing?.attributes as any)?._listing_type_id || "gold_pro";
   const newPrice = parseFloat(editPrice) || 0;
 
@@ -98,7 +98,7 @@ export function EditPriceDialog({
                 <div className="grid grid-cols-2 gap-x-4 gap-y-1">
                   <span className="text-muted-foreground">Preço atual ML:</span>
                   <span className="text-foreground font-medium">{formatCurrency(listing.price)}</span>
-                  <span className="text-muted-foreground">Custo do produto:</span>
+                  <span className="text-muted-foreground">Seu custo:</span>
                   <span className="text-foreground font-medium">{formatCurrency(costPrice)}</span>
                   <span className="text-muted-foreground">Tipo de anúncio:</span>
                   <span className="text-foreground font-medium">
