@@ -187,6 +187,7 @@ export function useMlListings() {
   const createAndPublish = async (params: {
     product_id: string;
     title: string;
+    description?: string;
     price: number;
     listingType: string;
     freeShipping: boolean;
@@ -230,6 +231,7 @@ export function useMlListings() {
       listing = await api.post<MlListing>("/api/ml/listings", {
         product_id: params.product_id,
         title: params.title,
+        description: params.description || undefined,
         price: params.price,
         category_id: categoryId,
         attributes,

@@ -46,6 +46,8 @@ const SellerCatalogo = () => {
   const [listingType, setListingType] = useState("gold_pro");
   const [freeShipping, setFreeShipping] = useState(false);
   const [publishing, setPublishing] = useState(false);
+  const [editTitle, setEditTitle] = useState("");
+  const [editDescription, setEditDescription] = useState("");
 
   // Only show active products
   const availableProducts = products.filter((p) => p.status === "active");
@@ -61,13 +63,14 @@ const SellerCatalogo = () => {
 
 
   const handlePublish = async () => {
-    if (!detailProduct || calculatedPrice <= 0 || publishing) return;
+    if (!detailProduct || calculatedPrice <= 0 || publishing || !editTitle.trim()) return;
 
     setPublishing(true);
     try {
       await createAndPublish({
         product_id: detailProduct.id,
-        title: detailProduct.name,
+        title: editTitle.trim(),
+        description: editDescription.trim() || undefined,
         price: Math.round(calculatedPrice * 100) / 100,
         listingType,
         freeShipping,
@@ -159,7 +162,7 @@ const SellerCatalogo = () => {
               <div
                 key={product.id}
                 className="bg-card rounded-xl border border-border shadow-card overflow-hidden hover:shadow-elevated transition-shadow cursor-pointer group"
-                onClick={() => setDetailProduct(product)}
+                onClick={() => { setDetailProduct(product); setEditTitle(product.name); setEditDescription(product.description || ""); }}
               >
                 <div className="aspect-square bg-secondary/30 relative overflow-hidden">
                   {product.images.length > 0 ? (
@@ -200,14 +203,49 @@ const SellerCatalogo = () => {
       )}
 
       {/* Product Detail + Price Calculator Dialog */}
-      <Dialog open={!!detailProduct} onOpenChange={() => setDetailProduct(null)}>
+      <Dialog open={!!detailProduct} onOpenChange={(open) => {
+        if (!open) setDetailProduct(null);
+        if (open && detailProduct) {
+          setEditTitle(detailProduct.name);
+          setEditDescription(detailProduct.description || "");
+        }
+      }}>
         <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle className="font-display">{detailProduct?.name}</DialogTitle>
-            <DialogDescription>SKU: {detailProduct?.sku} — Configure seu preço de venda no Mercado Livre</DialogDescription>
+            <DialogTitle className="font-display">Anunciar Produto</DialogTitle>
+            <DialogDescription>SKU: {detailProduct?.sku} — Personalize título, descrição e preço</DialogDescription>
           </DialogHeader>
           {detailProduct && (
             <div className="space-y-4 mt-2">
+              {/* Editable Title */}
+              <div>
+                <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
+                  Título do Anúncio <span className="text-destructive">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={editTitle}
+                  onChange={(e) => setEditTitle(e.target.value)}
+                  maxLength={60}
+                  className="w-full h-10 px-3 rounded-lg border border-input bg-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                />
+                <p className="text-[10px] text-muted-foreground mt-0.5 text-right">{editTitle.length}/60 caracteres</p>
+              </div>
+
+              {/* Editable Description */}
+              <div>
+                <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
+                  Descrição do Anúncio
+                </label>
+                <textarea
+                  value={editDescription}
+                  onChange={(e) => setEditDescription(e.target.value)}
+                  placeholder="Descrição que aparecerá no ML... (opcional)"
+                  rows={3}
+                  className="w-full px-3 py-2 rounded-lg border border-input bg-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-ring resize-y"
+                />
+              </div>
+
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 {/* Left: Product Info */}
                 <div className="space-y-3">
@@ -276,14 +314,7 @@ const SellerCatalogo = () => {
                     </div>
                   </div>
 
-                  {detailProduct.description && (
-                    <details className="text-xs">
-                      <summary className="text-muted-foreground cursor-pointer hover:text-foreground font-medium">Ver descrição completa</summary>
-                      <p className="mt-1.5 p-2 rounded bg-background border border-border text-foreground whitespace-pre-wrap text-[11px] max-h-32 overflow-y-auto">
-                        {detailProduct.description}
-                      </p>
-                    </details>
-                  )}
+                  {/* Description moved to editable field above */}
                 </div>
 
                 {/* Right: Listing Type + Price Calculator */}
@@ -317,7 +348,7 @@ const SellerCatalogo = () => {
                   </div>
 
                   <MlPriceCalculator
-                    basePrice={detailProduct.cost_price}
+                    basePrice={detailProduct.sell_price}
                     onFinalPriceChange={(price) => setCalculatedPrice(price)}
                     onFreeShippingChange={setFreeShipping}
                     listingType={listingType}
