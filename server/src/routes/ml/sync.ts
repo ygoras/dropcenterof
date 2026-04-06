@@ -451,12 +451,15 @@ async function handlePublish(cred: MlCredRow, tenantId: string, listingId: strin
     _ml_net_amount: netAmount,
   };
 
+  // Extract thumbnail from publish response
+  const publishThumbnail = mlData.thumbnail || mlData.pictures?.[0]?.secure_url || mlData.pictures?.[0]?.url || null;
+
   await query(
     `UPDATE ml_listings
      SET ml_item_id = $1, ml_credential_id = $2, status = $3, sync_status = 'synced',
-         last_sync_at = NOW(), updated_at = NOW(), attributes = $4
-     WHERE id = $5`,
-    [mlData.id, cred.id, realStatus, JSON.stringify(updatedAttrs), listingId]
+         last_sync_at = NOW(), updated_at = NOW(), attributes = $4, ml_thumbnail = $5
+     WHERE id = $6`,
+    [mlData.id, cred.id, realStatus, JSON.stringify(updatedAttrs), publishThumbnail, listingId]
   );
 
   return reply.send({
@@ -820,7 +823,12 @@ async function handleRefresh(cred: MlCredRow, listingId: string, reply: any) {
     } catch { /* non-blocking */ }
   }
 
-  const netAmount = listing.price - saleFeeAmount - shippingCost;
+  // Use ML price if available (it may have changed on ML side)
+  const mlPrice = itemData.price || listing.price;
+  const netAmount = mlPrice - saleFeeAmount - shippingCost;
+
+  // Extract ML thumbnail
+  const mlThumbnail = itemData.thumbnail || itemData.pictures?.[0]?.secure_url || itemData.pictures?.[0]?.url || null;
 
   const updatedAttrs = {
     ...(listing.attributes || {}),
@@ -831,8 +839,10 @@ async function handleRefresh(cred: MlCredRow, listingId: string, reply: any) {
   };
 
   await query(
-    `UPDATE ml_listings SET status = $1, sync_status = 'synced', last_sync_at = NOW(), updated_at = NOW(), attributes = $2 WHERE id = $3`,
-    [realStatus, JSON.stringify(updatedAttrs), listingId]
+    `UPDATE ml_listings SET status = $1, sync_status = 'synced', last_sync_at = NOW(), updated_at = NOW(),
+     title = $2, price = $3, ml_thumbnail = $4, attributes = $5
+     WHERE id = $6`,
+    [realStatus, itemData.title || listing.title, mlPrice, mlThumbnail, JSON.stringify(updatedAttrs), listingId]
   );
 
   return reply.send({
@@ -896,6 +906,9 @@ async function handleImport(cred: MlCredRow, tenantId: string, mlItemId: string,
   const listingTypeId = mlData.listing_type_id || 'gold_special';
   const permalink = mlData.permalink || null;
 
+  // Extract thumbnail from ML pictures
+  const mlThumbnail = mlData.thumbnail || mlData.pictures?.[0]?.secure_url || mlData.pictures?.[0]?.url || null;
+
   const attributes: Record<string, unknown> = {
     _listing_type_id: listingTypeId,
     _imported: true,
@@ -906,10 +919,10 @@ async function handleImport(cred: MlCredRow, tenantId: string, mlItemId: string,
 
   // Create listing in DB
   const listing = await queryOne<{ id: string }>(
-    `INSERT INTO ml_listings (product_id, tenant_id, ml_item_id, ml_credential_id, title, price, status, category_id, sync_status, attributes, source, last_sync_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'synced', $9, 'imported', NOW())
+    `INSERT INTO ml_listings (product_id, tenant_id, ml_item_id, ml_credential_id, title, price, status, category_id, sync_status, attributes, source, ml_thumbnail, last_sync_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'synced', $9, 'imported', $10, NOW())
      RETURNING id`,
-    [productId, tenantId, cleanId, cred.id, title, price, status, categoryId, JSON.stringify(attributes)]
+    [productId, tenantId, cleanId, cred.id, title, price, status, categoryId, JSON.stringify(attributes), mlThumbnail]
   );
 
   if (!listing) {

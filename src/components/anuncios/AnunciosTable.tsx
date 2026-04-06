@@ -35,6 +35,7 @@ interface Listing {
   category_id?: string | null;
   store_name?: string;
   source?: string;
+  ml_thumbnail?: string | null;
 }
 
 interface AnunciosTableProps {
@@ -76,8 +77,7 @@ export function AnunciosTable({
         <table className="w-full">
           <thead>
             <tr className="border-b border-border bg-muted/30">
-              <th className="text-left text-xs font-semibold text-muted-foreground px-4 py-3">Produto</th>
-              <th className="text-left text-xs font-semibold text-muted-foreground px-4 py-3">Título ML</th>
+              <th className="text-left text-xs font-semibold text-muted-foreground px-4 py-3">Anúncio</th>
               <th className="text-center text-xs font-semibold text-muted-foreground px-4 py-3">Loja</th>
               <th className="text-center text-xs font-semibold text-muted-foreground px-4 py-3">Tipo</th>
               <th className="text-right text-xs font-semibold text-muted-foreground px-4 py-3">Preço</th>
@@ -98,21 +98,18 @@ export function AnunciosTable({
                 <tr key={listing.id} className="border-b border-border last:border-0 hover:bg-muted/20 transition-colors">
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-2">
-                      {listing.product_images && listing.product_images.length > 0 ? (
-                        <img src={listing.product_images[0]} alt="" className="w-8 h-8 rounded object-cover border border-border" />
+                      {(listing.ml_thumbnail || (listing.product_images && listing.product_images.length > 0)) ? (
+                        <img src={listing.ml_thumbnail || listing.product_images?.[0]} alt="" className="w-8 h-8 rounded object-cover border border-border" />
                       ) : (
                         <div className="w-8 h-8 rounded bg-secondary/50 flex items-center justify-center">
                           <Package className="w-4 h-4 text-muted-foreground" />
                         </div>
                       )}
                       <div>
-                        <p className="text-sm font-medium text-foreground line-clamp-1">{listing.product_name || "—"}</p>
+                        <p className="text-sm font-medium text-foreground line-clamp-1">{listing.title}</p>
                         <p className="text-[10px] text-muted-foreground">{listing.product_sku}</p>
                       </div>
                     </div>
-                  </td>
-                  <td className="px-4 py-3">
-                    <p className="text-sm text-foreground line-clamp-1">{listing.title}</p>
                   </td>
                   <td className="px-4 py-3 text-center">
                     <span className="text-xs font-medium text-muted-foreground bg-secondary/50 px-2 py-0.5 rounded-full">

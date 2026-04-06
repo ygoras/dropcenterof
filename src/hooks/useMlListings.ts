@@ -23,6 +23,8 @@ export interface MlListing {
   product_sku?: string;
   product_images?: string[];
   store_name?: string;
+  ml_thumbnail?: string | null;
+  source?: string;
 }
 
 export function useMlListings() {
