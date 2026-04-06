@@ -306,9 +306,9 @@ async function handlePublish(cred: MlCredRow, tenantId: string, listingId: strin
     });
   }
 
-  // Post description
-  const productDescription = product?.description;
-  if (productDescription && mlData.id) {
+  // Post description — listing description (seller-customized) takes priority over product description
+  const itemDescription = listing.description || product?.description;
+  if (itemDescription && mlData.id) {
     try {
       const descRes = await fetch(`${ML_API}/items/${mlData.id}/description`, {
         method: 'POST',
@@ -317,7 +317,7 @@ async function handlePublish(cred: MlCredRow, tenantId: string, listingId: strin
           'Content-Type': 'application/json',
           Accept: 'application/json',
         },
-        body: JSON.stringify({ plain_text: productDescription }),
+        body: JSON.stringify({ plain_text: itemDescription }),
       });
       if (!descRes.ok) {
         // Try PUT as fallback
@@ -328,7 +328,7 @@ async function handlePublish(cred: MlCredRow, tenantId: string, listingId: strin
             'Content-Type': 'application/json',
             Accept: 'application/json',
           },
-          body: JSON.stringify({ plain_text: productDescription }),
+          body: JSON.stringify({ plain_text: itemDescription }),
         });
       }
     } catch (err) {

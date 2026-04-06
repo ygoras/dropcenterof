@@ -75,6 +75,7 @@ export async function registerMlCrudRoutes(app: FastifyInstance) {
     const body = request.body as {
       product_id: string;
       title: string;
+      description?: string;
       price: number;
       category_id?: string;
       attributes?: Record<string, unknown>;
@@ -82,13 +83,14 @@ export async function registerMlCrudRoutes(app: FastifyInstance) {
     };
 
     const result = await queryOne<{ id: string }>(
-      `INSERT INTO ml_listings (product_id, tenant_id, title, price, category_id, attributes, ml_credential_id, status, sync_status)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, 'draft', 'pending')
+      `INSERT INTO ml_listings (product_id, tenant_id, title, description, price, category_id, attributes, ml_credential_id, status, sync_status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'draft', 'pending')
        RETURNING id`,
       [
         body.product_id,
         request.user.tenantId,
         body.title,
+        body.description ?? null,
         body.price,
         body.category_id ?? null,
         JSON.stringify(body.attributes ?? {}),

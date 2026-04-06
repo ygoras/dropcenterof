@@ -32,6 +32,7 @@ interface CreateListingDialogProps {
   onCreateListing: (data: {
     product_id: string;
     title: string;
+    description?: string;
     price: number;
     category_id?: string;
     attributes: Record<string, unknown>;
@@ -51,6 +52,7 @@ export function CreateListingDialog({
   const [selectedProduct, setSelectedProduct] = useState("");
   const [selectedStore, setSelectedStore] = useState(stores.length === 1 ? stores[0].id : "");
   const [listingTitle, setListingTitle] = useState("");
+  const [listingDescription, setListingDescription] = useState("");
   const [listingPrice, setListingPrice] = useState("");
   const [listingType, setListingType] = useState("gold_pro");
   const [creating, setCreating] = useState(false);
@@ -77,6 +79,7 @@ export function CreateListingDialog({
     const product = activeProducts.find((p) => p.id === productId);
     if (product) {
       setListingTitle(product.name);
+      setListingDescription(product.description || "");
       setListingPrice(product.sell_price.toString());
     }
   };
@@ -118,6 +121,7 @@ export function CreateListingDialog({
     await onCreateListing({
       product_id: selectedProduct,
       title: listingTitle,
+      description: listingDescription || undefined,
       price: parseFloat(listingPrice),
       category_id: selectedCategory?.id,
       ml_credential_id: selectedStore || undefined,
@@ -143,6 +147,7 @@ export function CreateListingDialog({
     setSelectedProduct("");
     setSelectedStore(stores.length === 1 ? stores[0].id : "");
     setListingTitle("");
+    setListingDescription("");
     setListingPrice("");
     setListingType("gold_pro");
     setCategorySearch("");
@@ -222,6 +227,20 @@ export function CreateListingDialog({
               ) : <span />}
               <p className="text-[10px] text-muted-foreground">{listingTitle.length}/60 caracteres</p>
             </div>
+          </div>
+
+          {/* Description */}
+          <div>
+            <label className="text-xs font-medium mb-1.5 block text-muted-foreground">
+              Descrição do Anúncio
+            </label>
+            <textarea
+              value={listingDescription}
+              onChange={(e) => setListingDescription(e.target.value)}
+              placeholder="Descrição que aparecerá no ML... (opcional — se vazio, usa a descrição do produto)"
+              rows={3}
+              className="w-full px-3 py-2 rounded-lg border border-input bg-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-ring resize-y"
+            />
           </div>
 
           {/* Price */}

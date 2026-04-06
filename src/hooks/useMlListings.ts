@@ -51,6 +51,7 @@ export function useMlListings() {
   const createListing = async (listing: {
     product_id: string;
     title: string;
+    description?: string;
     price: number;
     category_id?: string;
     attributes?: Record<string, unknown>;
