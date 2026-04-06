@@ -17,11 +17,12 @@ interface ImportListingDialogProps {
 
 function extractMlItemId(input: string): string | null {
   const trimmed = input.trim();
-  // Direct ID: MLB1234567890
-  if (/^MLB\d+$/i.test(trimmed)) return trimmed.toUpperCase();
-  // URL: https://produto.mercadolivre.com.br/MLB-1234567890-...
-  const urlMatch = trimmed.match(/MLB[- ]?(\d+)/i);
-  if (urlMatch) return `MLB${urlMatch[1]}`;
+  // Match any MLB prefix (MLB, MLBU, etc.) followed by digits
+  // Works with: MLB1234567890, MLBU3668349828, MLB-1234567890-titulo...
+  // URLs: https://www.mercadolivre.com.br/.../up/MLBU3668349828
+  //       https://produto.mercadolivre.com.br/MLB-1234567890-...
+  const match = trimmed.match(/MLB[A-Z]?\d+/i);
+  if (match) return match[0].toUpperCase();
   return null;
 }
 
@@ -90,7 +91,7 @@ export function ImportListingDialog({ open, onOpenChange, activeProducts, onImpo
                 type="text"
                 value={mlUrl}
                 onChange={(e) => { setMlUrl(e.target.value); setError(""); }}
-                placeholder="https://produto.mercadolivre.com.br/MLB-... ou MLB1234567890"
+                placeholder="Cole o link do ML ou digite o ID (ex: MLB1234567890)"
                 className="w-full h-10 pl-9 pr-3 rounded-lg border border-input bg-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-ring"
               />
             </div>

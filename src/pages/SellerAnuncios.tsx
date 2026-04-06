@@ -2,12 +2,10 @@ import { useState, useEffect } from "react";
 import { formatCurrency } from "@/lib/formatters";
 import {
   ClipboardList,
-  Plus,
   Download,
   Search,
   Store,
   AlertTriangle,
-  Lock,
   Crown,
 } from "lucide-react";
 import {
@@ -26,20 +24,18 @@ import { useSellerPlan } from "@/hooks/useSellerPlan";
 import { Link } from "react-router-dom";
 import { AnunciosStats } from "@/components/anuncios/AnunciosStats";
 import { AnunciosTable } from "@/components/anuncios/AnunciosTable";
-import { CreateListingDialog } from "@/components/anuncios/CreateListingDialog";
 import { EditPriceDialog } from "@/components/anuncios/EditPriceDialog";
 import { ImportListingDialog } from "@/components/anuncios/ImportListingDialog";
 import { toast } from "sonner";
 
 const SellerAnuncios = () => {
-  const { listings, loading, createListing, deleteListing, syncListing, updateListingPrice, refreshListing, importListing } = useMlListings();
+  const { listings, loading, deleteListing, syncListing, updateListingPrice, refreshListing, importListing } = useMlListings();
   const { credentials, isConnected } = useMlCredentials();
   const { products } = useProducts();
   const { profile } = useProfile();
   const { plan, canCreateListing, remainingListings, isBlocked, maxListings, activeListingsCount } = useSellerPlan();
   const [search, setSearch] = useState("");
   const [storeFilter, setStoreFilter] = useState("all");
-  const [showCreate, setShowCreate] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [salesByProduct, setSalesByProduct] = useState<Record<string, number>>({});
   const [editingListing, setEditingListing] = useState<string | null>(null);
@@ -122,24 +118,6 @@ const SellerAnuncios = () => {
             Gerencie seus anúncios no Mercado Livre
           </p>
         </div>
-        <button
-          onClick={() => {
-            if (isBlocked) {
-              toast.error("Sua assinatura está bloqueada. Entre em contato com o suporte.");
-              return;
-            }
-            if (!canCreateListing) {
-              toast.error(`Você atingiu o limite de ${maxListings} anúncios ativos do plano ${plan?.name ?? ""}.`);
-              return;
-            }
-            setShowCreate(true);
-          }}
-          disabled={isBlocked}
-          className="h-10 px-5 rounded-lg gradient-primary text-primary-foreground text-sm font-medium flex items-center gap-2 hover:opacity-90 transition-opacity self-start disabled:opacity-50"
-        >
-          {isBlocked ? <Lock className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
-          Novo Anúncio
-        </button>
         <button
           onClick={() => setShowImport(true)}
           className="h-10 px-5 rounded-lg border border-primary text-primary text-sm font-medium flex items-center gap-2 hover:bg-primary/10 transition-colors self-start"
@@ -242,16 +220,6 @@ const SellerAnuncios = () => {
           formatCurrency={formatCurrency}
         />
       )}
-
-      {/* Create Dialog */}
-      <CreateListingDialog
-        open={showCreate}
-        onOpenChange={setShowCreate}
-        activeProducts={activeProducts}
-        stores={credentials.map(c => ({ id: c.id, store_name: c.store_name, ml_nickname: c.ml_nickname }))}
-        onCreateListing={async (data) => { await createListing(data); }}
-        formatCurrency={formatCurrency}
-      />
 
       {/* Import Listing Dialog */}
       <ImportListingDialog

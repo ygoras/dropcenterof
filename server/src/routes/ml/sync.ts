@@ -777,24 +777,47 @@ async function handleRefresh(cred: MlCredRow, listingId: string, reply: any) {
     logger.warn({ err }, 'Refresh: could not fetch fees');
   }
 
-  // 3. Get shipping cost from item shipping options
+  // 3. Get shipping cost — aligned with handlePublish logic
   let shippingCost = 0;
-  try {
-    const shippingRes = await fetch(`${ML_API}/items/${listing.ml_item_id}/shipping_options?zip_code=01310100`, {
-      headers: { Authorization: `Bearer ${cred.access_token}`, Accept: 'application/json' },
-    });
-    if (shippingRes.ok) {
-      const shippingData: any = await shippingRes.json();
-      if (shippingData?.options?.length > 0) {
-        const recommended = shippingData.options.find((o: any) => o.recommended) || shippingData.options[0];
-        shippingCost = recommended?.list_cost || recommended?.cost || 0;
+  const fetchShippingCost = async (): Promise<number> => {
+    try {
+      const res = await fetch(`${ML_API}/items/${listing.ml_item_id}/shipping_options`, {
+        headers: { Authorization: `Bearer ${cred.access_token}`, Accept: 'application/json' },
+      });
+      if (!res.ok) return 0;
+      const data: any = await res.json();
+      // Check coverage first (same order as handlePublish)
+      if (data?.coverage?.all_country?.list_cost) return data.coverage.all_country.list_cost;
+      if (data?.options?.length > 0) {
+        const rec = data.options.find((o: any) => o.recommended) || data.options[0];
+        return rec?.list_cost || rec?.cost || 0;
       }
-      if (!shippingCost && shippingData?.coverage?.all_country?.list_cost) {
-        shippingCost = shippingData.coverage.all_country.list_cost;
+      return 0;
+    } catch { return 0; }
+  };
+
+  shippingCost = await fetchShippingCost();
+
+  // Retry after 2s if zero (ML may not have processed yet)
+  if (shippingCost === 0) {
+    await new Promise(r => setTimeout(r, 2000));
+    shippingCost = await fetchShippingCost();
+  }
+
+  // Fallback: /users/{id}/shipping_options/free
+  if (shippingCost === 0 && cred.ml_user_id) {
+    try {
+      const fallbackRes = await fetch(
+        `${ML_API}/users/${cred.ml_user_id}/shipping_options/free?dimensions=10x10x10,500&item_price=${listing.price}`,
+        { headers: { Authorization: `Bearer ${cred.access_token}`, Accept: 'application/json' } }
+      );
+      if (fallbackRes.ok) {
+        const fbData: any = await fallbackRes.json();
+        if (fbData?.coverage?.all_country?.list_cost) {
+          shippingCost = fbData.coverage.all_country.list_cost;
+        }
       }
-    }
-  } catch (err) {
-    logger.warn({ err }, 'Refresh: could not fetch shipping');
+    } catch { /* non-blocking */ }
   }
 
   const netAmount = listing.price - saleFeeAmount - shippingCost;
