@@ -426,4 +426,76 @@ export async function registerUserRoutes(app: FastifyInstance) {
     await query(`DELETE FROM auth_users WHERE id = $1`, [operatorId]);
     return reply.send({ success: true });
   });
+
+  // ─── INTERNAL USERS (admin/manager) ──────────────────────────────
+
+  // List internal users (admins and managers)
+  app.get('/api/admin/internal-users', {
+    preHandler: [authMiddleware, requireRole('admin')],
+  }, async () => {
+    return queryMany(
+      `SELECT p.id, p.name, p.email, p.phone, p.is_active, p.created_at,
+              ARRAY_AGG(ur.role) as roles
+       FROM profiles p
+       JOIN user_roles ur ON ur.user_id = p.id
+       WHERE ur.role IN ('admin', 'manager')
+       GROUP BY p.id
+       ORDER BY p.created_at DESC`
+    );
+  });
+
+  // Create internal user (admin/manager)
+  app.post('/api/admin/internal-users', {
+    preHandler: [authMiddleware, requireRole('admin'), validateBody(z.object({
+      email: z.string().email(),
+      password: z.string().min(6),
+      name: z.string().min(2),
+      role: z.enum(['admin', 'manager']),
+      phone: z.string().nullable().optional(),
+    }))],
+  }, async (request, reply) => {
+    const body = request.body as { email: string; password: string; name: string; role: string; phone?: string | null };
+
+    try {
+      const user = await authService.createUserWithRole(
+        body.email, body.password, body.name, body.role, undefined, body.phone
+      );
+      return reply.status(201).send(user);
+    } catch (err: any) {
+      logger.error({ err }, 'Error creating internal user');
+      const msg = err.message || 'Erro ao criar usuário';
+      // Clerk duplicate email error
+      if (msg.includes('already exists') || msg.includes('duplicate') || err.status === 422) {
+        return reply.status(409).send({ error: 'Este e-mail já está cadastrado' });
+      }
+      return reply.status(500).send({ error: msg });
+    }
+  });
+
+  // Update internal user (activate/deactivate, change role)
+  app.patch('/api/admin/internal-users/:userId', {
+    preHandler: [authMiddleware, requireRole('admin')],
+  }, async (request, reply) => {
+    const { userId } = request.params as { userId: string };
+    const body = request.body as { is_active?: boolean; name?: string; role?: string };
+
+    if (body.is_active !== undefined) {
+      await query(`UPDATE profiles SET is_active = $1 WHERE id = $2`, [body.is_active, userId]);
+    }
+    if (body.name) {
+      await query(`UPDATE profiles SET name = $1 WHERE id = $2`, [body.name, userId]);
+    }
+    if (body.role) {
+      await query(`UPDATE user_roles SET role = $1 WHERE user_id = $2 AND role IN ('admin', 'manager')`, [body.role, userId]);
+    }
+
+    const updated = await queryOne(
+      `SELECT p.id, p.name, p.email, p.is_active, ARRAY_AGG(ur.role) as roles
+       FROM profiles p JOIN user_roles ur ON ur.user_id = p.id
+       WHERE p.id = $1 GROUP BY p.id`,
+      [userId]
+    );
+
+    return updated || reply.status(404).send({ error: 'Usuário não encontrado' });
+  });
 }
