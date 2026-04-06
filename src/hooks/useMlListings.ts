@@ -297,5 +297,23 @@ export function useMlListings() {
     }
   };
 
-  return { listings, loading, createListing, deleteListing, syncListing, createAndPublish, updateListingPrice, refreshListing, refetch: fetchListings };
+  const importListing = async (mlItemId: string, productId: string) => {
+    try {
+      const data = await api.post<{ success?: boolean; error?: string; ml_error?: string; title?: string }>(
+        "/api/ml/sync",
+        { action: "import", ml_item_id: mlItemId, product_id: productId }
+      );
+      if (data?.success) {
+        toast.success("Anuncio importado com sucesso!");
+        await fetchListings();
+      }
+      return data;
+    } catch (err: any) {
+      const msg = err.message || "Erro ao importar";
+      toast.error(msg);
+      return { error: msg };
+    }
+  };
+
+  return { listings, loading, createListing, deleteListing, syncListing, createAndPublish, updateListingPrice, refreshListing, importListing, refetch: fetchListings };
 }

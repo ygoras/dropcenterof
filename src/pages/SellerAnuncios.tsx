@@ -3,6 +3,7 @@ import { formatCurrency } from "@/lib/formatters";
 import {
   ClipboardList,
   Plus,
+  Download,
   Search,
   Store,
   AlertTriangle,
@@ -27,10 +28,11 @@ import { AnunciosStats } from "@/components/anuncios/AnunciosStats";
 import { AnunciosTable } from "@/components/anuncios/AnunciosTable";
 import { CreateListingDialog } from "@/components/anuncios/CreateListingDialog";
 import { EditPriceDialog } from "@/components/anuncios/EditPriceDialog";
+import { ImportListingDialog } from "@/components/anuncios/ImportListingDialog";
 import { toast } from "sonner";
 
 const SellerAnuncios = () => {
-  const { listings, loading, createListing, deleteListing, syncListing, updateListingPrice, refreshListing } = useMlListings();
+  const { listings, loading, createListing, deleteListing, syncListing, updateListingPrice, refreshListing, importListing } = useMlListings();
   const { credentials, isConnected } = useMlCredentials();
   const { products } = useProducts();
   const { profile } = useProfile();
@@ -38,6 +40,7 @@ const SellerAnuncios = () => {
   const [search, setSearch] = useState("");
   const [storeFilter, setStoreFilter] = useState("all");
   const [showCreate, setShowCreate] = useState(false);
+  const [showImport, setShowImport] = useState(false);
   const [salesByProduct, setSalesByProduct] = useState<Record<string, number>>({});
   const [editingListing, setEditingListing] = useState<string | null>(null);
 
@@ -136,6 +139,13 @@ const SellerAnuncios = () => {
         >
           {isBlocked ? <Lock className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
           Novo Anúncio
+        </button>
+        <button
+          onClick={() => setShowImport(true)}
+          className="h-10 px-5 rounded-lg border border-primary text-primary text-sm font-medium flex items-center gap-2 hover:bg-primary/10 transition-colors self-start"
+        >
+          <Download className="w-4 h-4" />
+          Importar Anúncio
         </button>
       </div>
 
@@ -241,6 +251,14 @@ const SellerAnuncios = () => {
         stores={credentials.map(c => ({ id: c.id, store_name: c.store_name, ml_nickname: c.ml_nickname }))}
         onCreateListing={async (data) => { await createListing(data); }}
         formatCurrency={formatCurrency}
+      />
+
+      {/* Import Listing Dialog */}
+      <ImportListingDialog
+        open={showImport}
+        onOpenChange={setShowImport}
+        activeProducts={activeProducts}
+        onImport={importListing}
       />
 
       {/* Edit Price Dialog */}

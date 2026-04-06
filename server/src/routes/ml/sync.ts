@@ -19,7 +19,7 @@ export async function registerMlSyncRoutes(app: FastifyInstance) {
     const body = request.body as {
       action?: string; listing_id?: string; product_id?: string;
       ml_credential_id?: string; listing_type_id?: string;
-      price?: number; category_id?: string;
+      price?: number; category_id?: string; ml_item_id?: string;
     };
     const { action, listing_id: listingId } = body;
 
@@ -68,6 +68,8 @@ export async function registerMlSyncRoutes(app: FastifyInstance) {
           return await handleGetFees(cred, body, reply);
         case 'refresh':
           return await handleRefresh(cred, listingId!, reply);
+        case 'import':
+          return await handleImport(cred, tenantId, body.ml_item_id!, body.product_id!, reply);
         default:
           return reply.status(400).send({ error: 'Ação inválida' });
       }
@@ -821,6 +823,96 @@ async function handleRefresh(cred: MlCredRow, listingId: string, reply: any) {
 }
 
 // ─── STOCK CHECK ─────────────────────────────────────────────────────
+// ─── IMPORT ─────────────────────────────────────────────────────────
+async function handleImport(cred: MlCredRow, tenantId: string, mlItemId: string, productId: string, reply: any) {
+  if (!mlItemId || !productId) {
+    return reply.status(400).send({ error: 'ml_item_id e product_id são obrigatórios' });
+  }
+
+  // Clean ML item ID (extract from URL if needed)
+  const cleanId = mlItemId.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+
+  // Check for duplicates
+  const existing = await queryOne(
+    `SELECT id FROM ml_listings WHERE ml_item_id = $1 AND tenant_id = $2`,
+    [cleanId, tenantId]
+  );
+  if (existing) {
+    return reply.status(409).send({ error: 'Este anúncio já foi importado' });
+  }
+
+  // Verify product exists
+  const product = await queryOne<{ id: string; name: string }>(
+    `SELECT id, name FROM products WHERE id = $1`,
+    [productId]
+  );
+  if (!product) {
+    return reply.status(404).send({ error: 'Produto não encontrado' });
+  }
+
+  // Fetch item from ML API
+  const mlRes = await fetch(`${ML_API}/items/${cleanId}`, {
+    headers: { Authorization: `Bearer ${cred.access_token}` },
+  });
+
+  if (!mlRes.ok) {
+    const errData: any = await mlRes.json().catch(() => ({}));
+    return reply.status(mlRes.status).send({
+      error: 'Não foi possível buscar o anúncio no ML',
+      ml_error: errData.message || errData.error || `HTTP ${mlRes.status}`,
+    });
+  }
+
+  const mlData: any = await mlRes.json();
+
+  // Extract data from ML item
+  const title = mlData.title || product.name;
+  const price = mlData.price || 0;
+  const status = mlData.status === 'active' ? 'active' : mlData.status === 'paused' ? 'paused' : 'paused';
+  const categoryId = mlData.category_id || null;
+  const listingTypeId = mlData.listing_type_id || 'gold_special';
+  const permalink = mlData.permalink || null;
+
+  const attributes: Record<string, unknown> = {
+    _listing_type_id: listingTypeId,
+    _imported: true,
+    _import_date: new Date().toISOString(),
+    _permalink: permalink,
+    _condition: mlData.condition || 'new',
+  };
+
+  // Create listing in DB
+  const listing = await queryOne<{ id: string }>(
+    `INSERT INTO ml_listings (product_id, tenant_id, ml_item_id, ml_credential_id, title, price, status, category_id, sync_status, attributes, source, last_sync_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'synced', $9, 'imported', NOW())
+     RETURNING id`,
+    [productId, tenantId, cleanId, cred.id, title, price, status, categoryId, JSON.stringify(attributes)]
+  );
+
+  if (!listing) {
+    return reply.status(500).send({ error: 'Erro ao criar listing importado' });
+  }
+
+  // Refresh to get real fees/shipping
+  try {
+    await handleRefresh(cred, listing.id, { status: () => ({ send: () => {} }) });
+  } catch {
+    // Non-blocking — listing was created, refresh is best-effort
+  }
+
+  logger.info({ tenantId, mlItemId: cleanId, listingId: listing.id, productId }, 'ML listing imported');
+
+  return reply.send({
+    success: true,
+    id: listing.id,
+    ml_item_id: cleanId,
+    title,
+    price,
+    status,
+    source: 'imported',
+  });
+}
+
 async function handleStockCheck(productId: string | undefined, reply: any) {
   if (!productId) {
     return reply.status(400).send({ error: 'product_id é obrigatório' });

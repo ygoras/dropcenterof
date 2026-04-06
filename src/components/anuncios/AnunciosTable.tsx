@@ -34,6 +34,7 @@ interface Listing {
   attributes?: Record<string, unknown> | null;
   category_id?: string | null;
   store_name?: string;
+  source?: string;
 }
 
 interface AnunciosTableProps {
@@ -85,6 +86,7 @@ export function AnunciosTable({
               <th className="text-right text-xs font-semibold text-muted-foreground px-4 py-3">Você Recebe</th>
               <th className="text-center text-xs font-semibold text-muted-foreground px-4 py-3">Vendas</th>
               <th className="text-center text-xs font-semibold text-muted-foreground px-4 py-3">Status</th>
+              <th className="text-center text-xs font-semibold text-muted-foreground px-4 py-3">Origem</th>
               <th className="text-center text-xs font-semibold text-muted-foreground px-4 py-3">ID ML</th>
               <th className="text-right text-xs font-semibold text-muted-foreground px-4 py-3">Ações</th>
             </tr>
@@ -153,6 +155,15 @@ export function AnunciosTable({
                   </td>
                   <td className="px-4 py-3 text-center">
                     <StatusBadge status={listing.status} />
+                  </td>
+                  <td className="px-4 py-3 text-center">
+                    <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
+                      listing.source === 'imported'
+                        ? 'bg-orange-500/10 text-orange-500 border border-orange-500/30'
+                        : 'bg-blue-500/10 text-blue-500 border border-blue-500/30'
+                    }`}>
+                      {listing.source === 'imported' ? 'Importado' : 'Interno'}
+                    </span>
                   </td>
                   <td className="px-4 py-3 text-center">
                     {listing.ml_item_id ? (
