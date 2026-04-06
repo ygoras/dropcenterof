@@ -354,6 +354,13 @@ async function handleOrderNotification(credential: MlCredential, resource: strin
     }
   }
 
+  // Skip orders where NO items match registered listings
+  const hasRegisteredItems = orderItems.some(item => !!item.product_id);
+  if (!hasRegisteredItems) {
+    logger.info({ mlOrderId: mlOrderId, tenantId: credential.tenant_id }, 'Order skipped — no items registered in ml_listings');
+    return;
+  }
+
   // 4. Calculate totals
   const subtotal = orderItems.reduce(
     (sum, item) => sum + item.quantity * item.unit_price, 0
