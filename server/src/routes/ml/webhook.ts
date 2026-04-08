@@ -155,6 +155,9 @@ export async function registerMlWebhookRoutes(app: FastifyInstance) {
           case 'questions':
             logger.info({ tenantId: credential.tenant_id, resource }, 'Question notification received');
             break;
+          case 'claims':
+            await handleClaimNotification(credential, resource || '');
+            break;
           default:
             logger.info({ topic }, 'Unhandled ML webhook topic');
         }
@@ -359,6 +362,24 @@ async function handleOrderNotification(credential: MlCredential, resource: strin
   if (!hasRegisteredItems) {
     logger.info({ mlOrderId: mlOrderId, tenantId: credential.tenant_id }, 'Order skipped — no items registered in ml_listings');
     return;
+  }
+
+  // Skip orders created BEFORE the listing was registered/imported
+  for (const orderItem of orderItems) {
+    if (orderItem.product_id && orderItem.ml_item_id) {
+      const listingDate = await queryOne<{ created_at: string }>(
+        `SELECT created_at FROM ml_listings WHERE ml_item_id = $1 AND tenant_id = $2 LIMIT 1`,
+        [orderItem.ml_item_id, credential.tenant_id]
+      );
+      if (listingDate && orderData.date_created) {
+        const orderCreated = new Date(orderData.date_created);
+        const listingCreated = new Date(listingDate.created_at);
+        if (orderCreated < listingCreated) {
+          logger.info({ mlOrderId: mlOrderId, orderDate: orderData.date_created, listingDate: listingDate.created_at }, 'Order skipped — created before listing registration');
+          return;
+        }
+      }
+    }
   }
 
   // 4. Calculate totals
@@ -810,4 +831,54 @@ async function resolveCredential(mlCredentialId: string | null, tenantId: string
     `SELECT access_token FROM ml_credentials WHERE tenant_id = $1 ORDER BY created_at LIMIT 1`,
     [tenantId]
   );
+}
+
+// ─── HANDLE CLAIM NOTIFICATION ─────────────────────────────────────
+async function handleClaimNotification(credential: MlCredential, resource: string) {
+  const ML_API = 'https://api.mercadolibre.com';
+
+  // resource is like /claims/123456789
+  const claimIdMatch = resource.match(/\d+/);
+  if (!claimIdMatch) {
+    logger.warn({ resource }, 'Could not extract claim ID');
+    return;
+  }
+  const claimId = claimIdMatch[0];
+
+  try {
+    // Fetch claim details from ML API
+    const claimRes = await fetch(`${ML_API}/claims/${claimId}`, {
+      headers: { Authorization: `Bearer ${credential.access_token}` },
+    });
+
+    if (!claimRes.ok) {
+      logger.warn({ claimId, status: claimRes.status }, 'Failed to fetch claim from ML');
+      return;
+    }
+
+    const claimData: any = await claimRes.json();
+    const mlOrderId = claimData.resource_id?.toString() || null;
+    const claimStatus = claimData.status || 'opened'; // opened, closed, etc.
+
+    if (!mlOrderId) {
+      logger.warn({ claimId }, 'Claim has no associated order');
+      return;
+    }
+
+    // Update order with claim status
+    const updated = await queryOne(
+      `UPDATE orders SET claim_status = $1, updated_at = NOW()
+       WHERE ml_order_id = $2 AND tenant_id = $3
+       RETURNING id, status, order_number`,
+      [claimStatus, mlOrderId, credential.tenant_id]
+    );
+
+    if (updated) {
+      logger.info({ claimId, mlOrderId, claimStatus, orderId: (updated as any).id }, 'Order claim status updated');
+    } else {
+      logger.info({ claimId, mlOrderId }, 'Claim received but no matching order found');
+    }
+  } catch (err) {
+    logger.error({ err, claimId }, 'Error processing claim notification');
+  }
 }

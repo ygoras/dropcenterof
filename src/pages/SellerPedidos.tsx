@@ -49,19 +49,7 @@ const orderStatusFlow: Record<string, { label: string; badgeStatus: string; icon
 };
 
 import { useMlCredentials } from "@/hooks/useMlCredentials";
-
-const mlStatusLabels: Record<string, string> = {
-  confirmed: "Confirmado",
-  paid: "Pago",
-  payment_required: "Pgto. Pendente",
-  payment_in_process: "Pgto. em Processo",
-  partially_paid: "Pgto. Parcial",
-  partially_refunded: "Reembolso Parcial",
-  pending_cancel: "Cancelamento Pendente",
-  cancelled: "Cancelado",
-  shipped: "Enviado",
-  delivered: "Entregue",
-};
+import { getMlStatusLabel, getClaimBadge } from "@/lib/mlStatusLabels";
 
 const SellerPedidos = () => {
   const { orders, loading } = useOrders();
@@ -224,13 +212,16 @@ const SellerPedidos = () => {
                         <StatusBadge status={config.badgeStatus} label={config.label} />
                       </td>
                       <td className="py-3 px-4">
-                        {order.ml_status ? (
-                          <span className="text-xs font-medium text-muted-foreground bg-secondary/50 px-2 py-0.5 rounded-full">
-                            {mlStatusLabels[order.ml_status] || order.ml_status}
+                        <div className="flex flex-col gap-1">
+                          <span className="text-xs font-medium text-muted-foreground bg-secondary/50 px-2 py-0.5 rounded-full inline-block w-fit">
+                            {getMlStatusLabel(order.ml_status)}
                           </span>
-                        ) : (
-                          <span className="text-xs text-muted-foreground">—</span>
-                        )}
+                          {order.claim_status && getClaimBadge(order.claim_status, order.status) && (
+                            <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border inline-block w-fit ${getClaimBadge(order.claim_status, order.status)!.color}`}>
+                              {getClaimBadge(order.claim_status, order.status)!.label}
+                            </span>
+                          )}
+                        </div>
                       </td>
                       <td className="py-3 px-4">
                         {order.tracking_code ? (

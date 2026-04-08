@@ -44,7 +44,10 @@ const OperacaoSeparacao = () => {
     const productMap = Object.fromEntries(products.map((p: any) => [p.id, { name: p.name, sku: p.sku, category: p.category }]));
     const shipmentMap = Object.fromEntries(shipments.map((s: any) => [s.order_id, s]));
 
-    const tasks: OrderTask[] = orders.map((order: any) => {
+    // Filter out orders with open claims (etiqueta not yet printed)
+    const filteredOrders = orders.filter((order: any) => !order.claim_status || order.claim_status !== 'opened');
+
+    const tasks: OrderTask[] = filteredOrders.map((order: any) => {
       const orderItems = Array.isArray(order.items) ? order.items : [];
       const shipment = shipmentMap[order.id];
       return {

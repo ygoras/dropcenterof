@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { formatDateTime as formatDate } from "@/lib/formatters";
+import { getMlStatusLabel } from "@/lib/mlStatusLabels";
 import {
   Truck,
   Package,
@@ -73,6 +74,7 @@ interface PickingTaskRow {
   // joined
   order_number: string;
   order_status: string;
+  ml_status: string | null;
   tenant_name: string;
   operator_name: string;
   item_count: number;
@@ -172,6 +174,7 @@ const Logistica = () => {
         created_at: t.created_at,
         order_number: order?.order_number || t.order_id.slice(0, 8),
         order_status: order?.status || "unknown",
+        ml_status: (order as any)?.ml_status || null,
         tenant_name: order ? tenantMap[order.tenant_id] || "—" : "—",
         operator_name: t.operator_id ? profileMap[t.operator_id] || "—" : "Não atribuído",
         item_count: itemsArray.length,
@@ -196,6 +199,7 @@ const Logistica = () => {
         created_at: order.created_at,
         order_number: order.order_number || order.id.slice(0, 8),
         order_status: order.status,
+        ml_status: (order as any)?.ml_status || null,
         tenant_name: tenantMap[order.tenant_id] || "—",
         operator_name: "Não atribuído",
         item_count: itemsArray.length,
@@ -351,6 +355,7 @@ const Logistica = () => {
                         <th className="text-center text-xs font-semibold text-muted-foreground px-4 py-3">Itens</th>
                         <th className="text-left text-xs font-semibold text-muted-foreground px-4 py-3">Operador</th>
                         <th className="text-center text-xs font-semibold text-muted-foreground px-4 py-3">Status</th>
+                        <th className="text-center text-xs font-semibold text-muted-foreground px-4 py-3">Status ML</th>
                         <th className="text-center text-xs font-semibold text-muted-foreground px-4 py-3">Duração</th>
                         <th className="text-center text-xs font-semibold text-muted-foreground px-4 py-3">Criado em</th>
                       </tr>
@@ -378,6 +383,11 @@ const Logistica = () => {
                           </td>
                           <td className="px-4 py-3 text-center">
                             <StatusBadge status={task.status === "awaiting" ? "approved" : task.status} />
+                          </td>
+                          <td className="px-4 py-3 text-center">
+                            <span className="text-xs text-muted-foreground bg-secondary/50 px-2 py-0.5 rounded-full">
+                              {getMlStatusLabel(task.ml_status)}
+                            </span>
                           </td>
                           <td className="px-4 py-3 text-center">
                             <span className="text-xs text-muted-foreground">

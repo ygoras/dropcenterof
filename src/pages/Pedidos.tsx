@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { formatCurrency, formatDateTime as formatDate } from "@/lib/formatters";
+import { getMlStatusLabel, getClaimBadge } from "@/lib/mlStatusLabels";
 import {
   ShoppingCart,
   Search,
@@ -174,6 +175,7 @@ const Pedidos = () => {
                    <th className="text-left py-3 px-4 text-muted-foreground font-medium">Itens</th>
                    <th className="text-left py-3 px-4 text-muted-foreground font-medium">Total</th>
                    <th className="text-left py-3 px-4 text-muted-foreground font-medium">Status</th>
+                   <th className="text-left py-3 px-4 text-muted-foreground font-medium">Status ML</th>
                    <th className="text-left py-3 px-4 text-muted-foreground font-medium">Data</th>
                    <th className="text-right py-3 px-4 text-muted-foreground font-medium">Ações</th>
                  </tr>
@@ -211,6 +213,18 @@ const Pedidos = () => {
                       </td>
                       <td className="py-3 px-4">
                         <StatusBadge status={config.badgeStatus} label={config.label} />
+                      </td>
+                      <td className="py-3 px-4">
+                        <div className="flex flex-col gap-1">
+                          <span className="text-xs font-medium text-muted-foreground bg-secondary/50 px-2 py-0.5 rounded-full inline-block w-fit">
+                            {getMlStatusLabel(order.ml_status)}
+                          </span>
+                          {order.claim_status && getClaimBadge(order.claim_status, order.status) && (
+                            <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border inline-block w-fit ${getClaimBadge(order.claim_status, order.status)!.color}`}>
+                              {getClaimBadge(order.claim_status, order.status)!.label}
+                            </span>
+                          )}
+                        </div>
                       </td>
                       <td className="py-3 px-4 text-muted-foreground text-xs">
                         {formatDate(order.created_at)}

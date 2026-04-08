@@ -22,6 +22,7 @@ export interface Order {
   ml_order_id: string | null;
   ml_credential_id: string | null;
   ml_status: string | null;
+  claim_status: string | null;
   created_at: string;
   updated_at: string;
   // Enriched fields (now returned by backend)

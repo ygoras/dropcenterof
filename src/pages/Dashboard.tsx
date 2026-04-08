@@ -1,5 +1,6 @@
 import { useEffect, useState, useMemo, useCallback } from "react";
 import { formatCurrency } from "@/lib/formatters";
+import { getMlStatusLabel } from "@/lib/mlStatusLabels";
 import {
   ShoppingCart,
   Package,
@@ -263,6 +264,7 @@ const Dashboard = () => {
                     <th className="text-left py-2 text-muted-foreground font-medium">Vendedor</th>
                     <th className="text-left py-2 text-muted-foreground font-medium">Itens</th>
                     <th className="text-left py-2 text-muted-foreground font-medium">Status</th>
+                    <th className="text-left py-2 text-muted-foreground font-medium">Status ML</th>
                     <th className="text-right py-2 text-muted-foreground font-medium">Valor</th>
                   </tr>
                 </thead>
@@ -276,6 +278,11 @@ const Dashboard = () => {
                         <td className="py-3 text-muted-foreground">{order.items?.length ?? 0}</td>
                         <td className="py-3">
                           <StatusBadge status={config.badgeStatus} label={config.label} />
+                        </td>
+                        <td className="py-3">
+                          <span className="text-xs text-muted-foreground bg-secondary/50 px-2 py-0.5 rounded-full">
+                            {getMlStatusLabel(order.ml_status)}
+                          </span>
                         </td>
                         <td className="py-3 text-right font-medium text-foreground">{formatCurrency(order.total)}</td>
                       </tr>
