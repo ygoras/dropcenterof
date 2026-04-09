@@ -825,15 +825,38 @@ async function handleRefresh(cred: MlCredRow, listingId: string, reply: any) {
   }
 
   // Use ML price if available (it may have changed on ML side)
-  const mlPrice = itemData.price || listing.price;
-  const netAmount = mlPrice - saleFeeAmount - shippingCost;
+  let mlPrice = itemData.price || listing.price;
 
   // Extract ML thumbnail
   const mlThumbnail = itemData.thumbnail || itemData.pictures?.[0]?.secure_url || itemData.pictures?.[0]?.url || null;
 
-  // Detect promotions
-  const hasPromotion = (itemData.deal_ids && itemData.deal_ids.length > 0) || (itemData.original_price != null && itemData.original_price > mlPrice);
-  const originalPrice = itemData.original_price || null;
+  // Detect promotions via /items/{id}/sale_price endpoint
+  let hasPromotion = false;
+  let originalPrice: number | null = null;
+  try {
+    const salePriceRes = await fetch(`${ML_API}/items/${listing.ml_item_id}/sale_price`, {
+      headers: { Authorization: `Bearer ${cred.access_token}`, Accept: 'application/json' },
+    });
+    if (salePriceRes.ok) {
+      const salePriceData: any = await salePriceRes.json();
+      // amount = current sale price, regular_amount = original price (if promo)
+      if (salePriceData.amount) mlPrice = salePriceData.amount;
+      if (salePriceData.regular_amount && salePriceData.regular_amount > salePriceData.amount) {
+        hasPromotion = true;
+        originalPrice = salePriceData.regular_amount;
+      }
+    }
+  } catch {
+    // Fallback: check itemData fields directly
+    if (itemData.original_price != null && itemData.original_price > mlPrice) {
+      hasPromotion = true;
+      originalPrice = itemData.original_price;
+    } else if (itemData.deal_ids && itemData.deal_ids.length > 0) {
+      hasPromotion = true;
+    }
+  }
+
+  const netAmount = mlPrice - saleFeeAmount - shippingCost;
 
   const updatedAttrs = {
     ...(listing.attributes || {}),
@@ -917,9 +940,28 @@ async function handleImport(cred: MlCredRow, tenantId: string, mlItemId: string,
   // Extract thumbnail from ML pictures
   const mlThumbnail = mlData.thumbnail || mlData.pictures?.[0]?.secure_url || mlData.pictures?.[0]?.url || null;
 
-  // Detect promotions
-  const hasPromo = (mlData.deal_ids && mlData.deal_ids.length > 0) || (mlData.original_price != null && mlData.original_price > price);
-  const origPrice = mlData.original_price || null;
+  // Detect promotions via /items/{id}/sale_price
+  let actualPrice = price;
+  let hasPromo = false;
+  let origPrice: number | null = null;
+  try {
+    const spRes = await fetch(`${ML_API}/items/${cleanId}/sale_price`, {
+      headers: { Authorization: `Bearer ${cred.access_token}`, Accept: 'application/json' },
+    });
+    if (spRes.ok) {
+      const spData: any = await spRes.json();
+      if (spData.amount) actualPrice = spData.amount;
+      if (spData.regular_amount && spData.regular_amount > spData.amount) {
+        hasPromo = true;
+        origPrice = spData.regular_amount;
+      }
+    }
+  } catch {
+    if (mlData.original_price != null && mlData.original_price > price) {
+      hasPromo = true;
+      origPrice = mlData.original_price;
+    }
+  }
 
   const attributes: Record<string, unknown> = {
     _listing_type_id: listingTypeId,
@@ -936,7 +978,7 @@ async function handleImport(cred: MlCredRow, tenantId: string, mlItemId: string,
     `INSERT INTO ml_listings (product_id, tenant_id, ml_item_id, ml_credential_id, title, price, status, category_id, sync_status, attributes, source, ml_thumbnail, original_price, has_promotion, last_sync_at)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'synced', $9, 'imported', $10, $11, $12, NOW())
      RETURNING id`,
-    [productId, tenantId, cleanId, cred.id, title, price, status, categoryId, JSON.stringify(attributes), mlThumbnail, origPrice, hasPromo]
+    [productId, tenantId, cleanId, cred.id, title, actualPrice, status, categoryId, JSON.stringify(attributes), mlThumbnail, origPrice, hasPromo]
   );
 
   if (!listing) {
