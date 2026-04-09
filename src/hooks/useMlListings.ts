@@ -280,12 +280,8 @@ export function useMlListings() {
 
   const refreshAllListings = async () => {
     const published = listings.filter(l => l.ml_item_id && l.status !== 'draft');
-    if (published.length === 0) {
-      toast.info("Nenhum anúncio publicado para atualizar");
-      return;
-    }
+    if (published.length === 0) return;
 
-    toast.info(`Atualizando ${published.length} anúncio(s)...`);
     let updated = 0;
     for (const listing of published) {
       try {
@@ -295,7 +291,6 @@ export function useMlListings() {
     }
 
     await fetchListings();
-    toast.success(`${updated}/${published.length} anúncio(s) atualizado(s) do ML`);
   };
 
   const refreshListing = async (listingId: string) => {

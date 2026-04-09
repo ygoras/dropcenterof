@@ -38,6 +38,7 @@ const SellerAnuncios = () => {
   const [search, setSearch] = useState("");
   const [storeFilter, setStoreFilter] = useState("all");
   const [showImport, setShowImport] = useState(false);
+  const [refreshingAll, setRefreshingAll] = useState(false);
   const [salesByProduct, setSalesByProduct] = useState<Record<string, number>>({});
   const [editingListing, setEditingListing] = useState<string | null>(null);
 
@@ -119,20 +120,23 @@ const SellerAnuncios = () => {
             Gerencie seus anúncios no Mercado Livre
           </p>
         </div>
-        <button
-          onClick={() => setShowImport(true)}
-          className="h-10 px-5 rounded-lg border border-primary text-primary text-sm font-medium flex items-center gap-2 hover:bg-primary/10 transition-colors self-start"
-        >
-          <Download className="w-4 h-4" />
-          Importar Anúncio
-        </button>
-        <button
-          onClick={refreshAllListings}
-          className="h-10 px-5 rounded-lg border border-border text-muted-foreground text-sm font-medium flex items-center gap-2 hover:bg-secondary transition-colors self-start"
-        >
-          <RefreshCw className="w-4 h-4" />
-          Atualizar Todos
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowImport(true)}
+            className="h-10 px-5 rounded-lg border border-primary text-primary text-sm font-medium flex items-center gap-2 hover:bg-primary/10 transition-colors"
+          >
+            <Download className="w-4 h-4" />
+            Importar Anúncio
+          </button>
+          <button
+            onClick={async () => { setRefreshingAll(true); await refreshAllListings(); setRefreshingAll(false); }}
+            disabled={refreshingAll}
+            className="h-10 px-5 rounded-lg border border-border text-muted-foreground text-sm font-medium flex items-center gap-2 hover:bg-secondary transition-colors disabled:opacity-60"
+          >
+            <RefreshCw className={`w-4 h-4 ${refreshingAll ? 'animate-spin' : ''}`} />
+            {refreshingAll ? 'Atualizando...' : 'Atualizar Todos'}
+          </button>
+        </div>
       </div>
 
       {/* Plan Info Banner */}
