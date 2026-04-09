@@ -759,7 +759,8 @@ async function handleRefresh(cred: MlCredRow, listingId: string, reply: any) {
   let saleFeeAmount = 0;
   try {
     const categoryId = listing.category_id || 'MLB1000';
-    const feesUrl = `${ML_API}/sites/MLB/listing_prices?price=${listing.price}&category_id=${categoryId}&listing_type_id=${ltId}&currency_id=BRL`;
+    const actualPrice = itemData.price || listing.price;
+    const feesUrl = `${ML_API}/sites/MLB/listing_prices?price=${actualPrice}&category_id=${categoryId}&listing_type_id=${ltId}&currency_id=BRL`;
     const feesRes = await fetch(feesUrl, {
       headers: { Authorization: `Bearer ${cred.access_token}`, Accept: 'application/json' },
     });
@@ -830,19 +831,26 @@ async function handleRefresh(cred: MlCredRow, listingId: string, reply: any) {
   // Extract ML thumbnail
   const mlThumbnail = itemData.thumbnail || itemData.pictures?.[0]?.secure_url || itemData.pictures?.[0]?.url || null;
 
+  // Detect promotions
+  const hasPromotion = (itemData.deal_ids && itemData.deal_ids.length > 0) || (itemData.original_price != null && itemData.original_price > mlPrice);
+  const originalPrice = itemData.original_price || null;
+
   const updatedAttrs = {
     ...(listing.attributes || {}),
     _ml_sale_fee: saleFeeAmount,
     _ml_shipping_cost: shippingCost,
     _ml_net_amount: netAmount,
     _listing_type_id: itemData.listing_type_id || (listing.attributes as any)?._listing_type_id,
+    _has_promotion: hasPromotion,
+    _ml_original_price: originalPrice,
   };
 
   await query(
     `UPDATE ml_listings SET status = $1, sync_status = 'synced', last_sync_at = NOW(), updated_at = NOW(),
-     title = $2, price = $3, ml_thumbnail = $4, attributes = $5
-     WHERE id = $6`,
-    [realStatus, itemData.title || listing.title, mlPrice, mlThumbnail, JSON.stringify(updatedAttrs), listingId]
+     title = $2, price = $3, ml_thumbnail = $4, attributes = $5,
+     original_price = $6, has_promotion = $7
+     WHERE id = $8`,
+    [realStatus, itemData.title || listing.title, mlPrice, mlThumbnail, JSON.stringify(updatedAttrs), originalPrice, hasPromotion, listingId]
   );
 
   return reply.send({
@@ -909,20 +917,26 @@ async function handleImport(cred: MlCredRow, tenantId: string, mlItemId: string,
   // Extract thumbnail from ML pictures
   const mlThumbnail = mlData.thumbnail || mlData.pictures?.[0]?.secure_url || mlData.pictures?.[0]?.url || null;
 
+  // Detect promotions
+  const hasPromo = (mlData.deal_ids && mlData.deal_ids.length > 0) || (mlData.original_price != null && mlData.original_price > price);
+  const origPrice = mlData.original_price || null;
+
   const attributes: Record<string, unknown> = {
     _listing_type_id: listingTypeId,
     _imported: true,
     _import_date: new Date().toISOString(),
     _permalink: permalink,
     _condition: mlData.condition || 'new',
+    _has_promotion: hasPromo,
+    _ml_original_price: origPrice,
   };
 
   // Create listing in DB
   const listing = await queryOne<{ id: string }>(
-    `INSERT INTO ml_listings (product_id, tenant_id, ml_item_id, ml_credential_id, title, price, status, category_id, sync_status, attributes, source, ml_thumbnail, last_sync_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'synced', $9, 'imported', $10, NOW())
+    `INSERT INTO ml_listings (product_id, tenant_id, ml_item_id, ml_credential_id, title, price, status, category_id, sync_status, attributes, source, ml_thumbnail, original_price, has_promotion, last_sync_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'synced', $9, 'imported', $10, $11, $12, NOW())
      RETURNING id`,
-    [productId, tenantId, cleanId, cred.id, title, price, status, categoryId, JSON.stringify(attributes), mlThumbnail]
+    [productId, tenantId, cleanId, cred.id, title, price, status, categoryId, JSON.stringify(attributes), mlThumbnail, origPrice, hasPromo]
   );
 
   if (!listing) {

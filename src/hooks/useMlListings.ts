@@ -25,6 +25,8 @@ export interface MlListing {
   store_name?: string;
   ml_thumbnail?: string | null;
   source?: string;
+  original_price?: number | null;
+  has_promotion?: boolean;
 }
 
 export function useMlListings() {

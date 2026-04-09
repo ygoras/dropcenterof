@@ -36,6 +36,8 @@ interface Listing {
   store_name?: string;
   source?: string;
   ml_thumbnail?: string | null;
+  original_price?: number | null;
+  has_promotion?: boolean;
 }
 
 interface AnunciosTableProps {
@@ -124,7 +126,15 @@ export function AnunciosTable({
                     </span>
                   </td>
                   <td className="px-4 py-3 text-right">
-                    <p className="text-sm font-semibold text-foreground">{formatCurrency(listing.price)}</p>
+                    {listing.has_promotion && listing.original_price ? (
+                      <div>
+                        <p className="text-[10px] text-muted-foreground line-through">{formatCurrency(listing.original_price)}</p>
+                        <p className="text-sm font-semibold text-green-500">{formatCurrency(listing.price)}</p>
+                        <span className="text-[9px] font-semibold text-green-500 bg-green-500/10 px-1.5 py-0.5 rounded-full">Promo</span>
+                      </div>
+                    ) : (
+                      <p className="text-sm font-semibold text-foreground">{formatCurrency(listing.price)}</p>
+                    )}
                   </td>
                   <td className="px-4 py-3 text-right">
                     {saleFee !== null ? (
