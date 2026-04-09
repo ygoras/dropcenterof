@@ -278,6 +278,24 @@ export function useMlListings() {
     }
   };
 
+  const refreshAllListings = async () => {
+    const published = listings.filter(l => l.ml_item_id && l.status !== 'draft');
+    if (published.length === 0) return;
+
+    let updated = 0;
+    for (const listing of published) {
+      try {
+        await api.post("/api/ml/sync", { action: "refresh", listing_id: listing.id });
+        updated++;
+      } catch { /* non-blocking */ }
+    }
+
+    if (updated > 0) {
+      await fetchListings();
+      toast.success(`${updated} anúncio(s) atualizado(s) do ML`);
+    }
+  };
+
   const refreshListing = async (listingId: string) => {
     toast.info("Sincronizando dados do Mercado Livre...");
 
@@ -319,5 +337,5 @@ export function useMlListings() {
     }
   };
 
-  return { listings, loading, createListing, deleteListing, syncListing, createAndPublish, updateListingPrice, refreshListing, importListing, refetch: fetchListings };
+  return { listings, loading, createListing, deleteListing, syncListing, createAndPublish, updateListingPrice, refreshListing, refreshAllListings, importListing, refetch: fetchListings };
 }

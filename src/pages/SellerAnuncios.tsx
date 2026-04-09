@@ -3,6 +3,7 @@ import { formatCurrency } from "@/lib/formatters";
 import {
   ClipboardList,
   Download,
+  RefreshCw,
   Search,
   Store,
   AlertTriangle,
@@ -29,7 +30,7 @@ import { ImportListingDialog } from "@/components/anuncios/ImportListingDialog";
 import { toast } from "sonner";
 
 const SellerAnuncios = () => {
-  const { listings, loading, deleteListing, syncListing, updateListingPrice, refreshListing, importListing } = useMlListings();
+  const { listings, loading, deleteListing, syncListing, updateListingPrice, refreshListing, refreshAllListings, importListing } = useMlListings();
   const { credentials, isConnected } = useMlCredentials();
   const { products } = useProducts();
   const { profile } = useProfile();
@@ -124,6 +125,13 @@ const SellerAnuncios = () => {
         >
           <Download className="w-4 h-4" />
           Importar Anúncio
+        </button>
+        <button
+          onClick={refreshAllListings}
+          className="h-10 px-5 rounded-lg border border-border text-muted-foreground text-sm font-medium flex items-center gap-2 hover:bg-secondary transition-colors self-start"
+        >
+          <RefreshCw className="w-4 h-4" />
+          Atualizar Todos
         </button>
       </div>
 
