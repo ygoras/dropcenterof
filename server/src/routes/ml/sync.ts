@@ -756,11 +756,40 @@ async function handleRefresh(cred: MlCredRow, listingId: string, reply: any) {
 
   // 2. Fetch commission using listing_prices
   const ltId = itemData.listing_type_id || (listing.attributes as any)?._listing_type_id || 'gold_pro';
+
+  // Extract ML thumbnail
+  const mlThumbnail = itemData.thumbnail || itemData.pictures?.[0]?.secure_url || itemData.pictures?.[0]?.url || null;
+
+  // 2. Get REAL price first (may be promotional) via /items/{id}/sale_price
+  let mlPrice = itemData.price || listing.price;
+  let hasPromotion = false;
+  let originalPrice: number | null = null;
+  try {
+    const salePriceRes = await fetch(`${ML_API}/items/${listing.ml_item_id}/sale_price`, {
+      headers: { Authorization: `Bearer ${cred.access_token}`, Accept: 'application/json' },
+    });
+    if (salePriceRes.ok) {
+      const salePriceData: any = await salePriceRes.json();
+      if (salePriceData.amount) mlPrice = salePriceData.amount;
+      if (salePriceData.regular_amount && salePriceData.regular_amount > salePriceData.amount) {
+        hasPromotion = true;
+        originalPrice = salePriceData.regular_amount;
+      }
+    }
+  } catch {
+    if (itemData.original_price != null && itemData.original_price > mlPrice) {
+      hasPromotion = true;
+      originalPrice = itemData.original_price;
+    } else if (itemData.deal_ids && itemData.deal_ids.length > 0) {
+      hasPromotion = true;
+    }
+  }
+
+  // 3. Calculate fees using the REAL selling price (promotional if applicable)
   let saleFeeAmount = 0;
   try {
     const categoryId = listing.category_id || 'MLB1000';
-    const actualPrice = itemData.price || listing.price;
-    const feesUrl = `${ML_API}/sites/MLB/listing_prices?price=${actualPrice}&category_id=${categoryId}&listing_type_id=${ltId}&currency_id=BRL`;
+    const feesUrl = `${ML_API}/sites/MLB/listing_prices?price=${mlPrice}&category_id=${categoryId}&listing_type_id=${ltId}&currency_id=BRL`;
     const feesRes = await fetch(feesUrl, {
       headers: { Authorization: `Bearer ${cred.access_token}`, Accept: 'application/json' },
     });
@@ -773,15 +802,15 @@ async function handleRefresh(cred: MlCredRow, listingId: string, reply: any) {
         saleFeeAmount = feesData.sale_fee_amount;
       }
     }
-    if (!saleFeeAmount && listing.price > 0) {
+    if (!saleFeeAmount && mlPrice > 0) {
       const pct = ltId === 'gold_pro' ? 0.165 : 0.13;
-      saleFeeAmount = Math.round(listing.price * pct * 100) / 100;
+      saleFeeAmount = Math.round(mlPrice * pct * 100) / 100;
     }
   } catch (err) {
     logger.warn({ err }, 'Refresh: could not fetch fees');
   }
 
-  // 3. Get shipping cost — aligned with handlePublish logic
+  // 4. Get shipping cost — aligned with handlePublish logic
   let shippingCost = 0;
   const fetchShippingCost = async (): Promise<number> => {
     try {
@@ -790,7 +819,6 @@ async function handleRefresh(cred: MlCredRow, listingId: string, reply: any) {
       });
       if (!res.ok) return 0;
       const data: any = await res.json();
-      // Check coverage first (same order as handlePublish)
       if (data?.coverage?.all_country?.list_cost) return data.coverage.all_country.list_cost;
       if (data?.options?.length > 0) {
         const rec = data.options.find((o: any) => o.recommended) || data.options[0];
@@ -801,18 +829,16 @@ async function handleRefresh(cred: MlCredRow, listingId: string, reply: any) {
   };
 
   shippingCost = await fetchShippingCost();
-
-  // Retry after 2s if zero (ML may not have processed yet)
   if (shippingCost === 0) {
     await new Promise(r => setTimeout(r, 2000));
     shippingCost = await fetchShippingCost();
   }
 
-  // Fallback: /users/{id}/shipping_options/free
+  // Fallback: /users/{id}/shipping_options/free with real price
   if (shippingCost === 0 && cred.ml_user_id) {
     try {
       const fallbackRes = await fetch(
-        `${ML_API}/users/${cred.ml_user_id}/shipping_options/free?dimensions=10x10x10,500&item_price=${listing.price}`,
+        `${ML_API}/users/${cred.ml_user_id}/shipping_options/free?dimensions=10x10x10,500&item_price=${mlPrice}`,
         { headers: { Authorization: `Bearer ${cred.access_token}`, Accept: 'application/json' } }
       );
       if (fallbackRes.ok) {
@@ -822,38 +848,6 @@ async function handleRefresh(cred: MlCredRow, listingId: string, reply: any) {
         }
       }
     } catch { /* non-blocking */ }
-  }
-
-  // Use ML price if available (it may have changed on ML side)
-  let mlPrice = itemData.price || listing.price;
-
-  // Extract ML thumbnail
-  const mlThumbnail = itemData.thumbnail || itemData.pictures?.[0]?.secure_url || itemData.pictures?.[0]?.url || null;
-
-  // Detect promotions via /items/{id}/sale_price endpoint
-  let hasPromotion = false;
-  let originalPrice: number | null = null;
-  try {
-    const salePriceRes = await fetch(`${ML_API}/items/${listing.ml_item_id}/sale_price`, {
-      headers: { Authorization: `Bearer ${cred.access_token}`, Accept: 'application/json' },
-    });
-    if (salePriceRes.ok) {
-      const salePriceData: any = await salePriceRes.json();
-      // amount = current sale price, regular_amount = original price (if promo)
-      if (salePriceData.amount) mlPrice = salePriceData.amount;
-      if (salePriceData.regular_amount && salePriceData.regular_amount > salePriceData.amount) {
-        hasPromotion = true;
-        originalPrice = salePriceData.regular_amount;
-      }
-    }
-  } catch {
-    // Fallback: check itemData fields directly
-    if (itemData.original_price != null && itemData.original_price > mlPrice) {
-      hasPromotion = true;
-      originalPrice = itemData.original_price;
-    } else if (itemData.deal_ids && itemData.deal_ids.length > 0) {
-      hasPromotion = true;
-    }
   }
 
   const netAmount = mlPrice - saleFeeAmount - shippingCost;
