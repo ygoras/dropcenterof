@@ -516,8 +516,17 @@ export async function registerMlMiscRoutes(app: FastifyInstance) {
       return reply.status(400).send({ error: 'Credenciais ML não encontradas' });
     }
 
+    // savePdf=Y instructs ML to include extra documents like DC-e/DACE when applicable
+    // (only shipments via Correios with drop_off/cross_docking logistic_type)
     const pdfRes = await fetch(
-      `${ML_API}/shipment_labels?shipment_ids=${shipmentIds}&response_type=pdf&access_token=${accessToken}`
+      `${ML_API}/shipment_labels?shipment_ids=${shipmentIds}&response_type=pdf&savePdf=Y`,
+      {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'x-format-new': 'true',
+          Accept: 'application/pdf',
+        },
+      }
     );
 
     if (!pdfRes.ok) {
@@ -526,6 +535,7 @@ export async function registerMlMiscRoutes(app: FastifyInstance) {
     }
 
     const pdfBuffer = Buffer.from(await pdfRes.arrayBuffer());
+    logger.info({ shipmentIds, bytes: pdfBuffer.length }, 'Label PDF fetched from ML');
 
     // Return full PDF as-is — includes etiqueta + DC-e/DACE + any other required docs
     return reply.type('application/pdf').send(pdfBuffer);
