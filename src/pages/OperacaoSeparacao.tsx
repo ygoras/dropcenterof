@@ -44,8 +44,13 @@ const OperacaoSeparacao = () => {
     const productMap = Object.fromEntries(products.map((p: any) => [p.id, { name: p.name, sku: p.sku, category: p.category }]));
     const shipmentMap = Object.fromEntries(shipments.map((s: any) => [s.order_id, s]));
 
-    // Filter out orders with open claims (etiqueta not yet printed)
-    const filteredOrders = orders.filter((order: any) => !order.claim_status || order.claim_status !== 'opened');
+    // Show only orders with label ready (tracking_code exists) and no open claims
+    const filteredOrders = orders.filter((order: any) => {
+      const hasNoClaim = !order.claim_status || order.claim_status !== 'opened';
+      const shipment = shipmentMap[order.id];
+      const hasLabel = !!(shipment?.tracking_code);
+      return hasNoClaim && hasLabel;
+    });
 
     const tasks: OrderTask[] = filteredOrders.map((order: any) => {
       const orderItems = Array.isArray(order.items) ? order.items : [];
