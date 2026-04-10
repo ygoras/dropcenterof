@@ -1,5 +1,4 @@
 import type { FastifyInstance } from 'fastify';
-import { PDFDocument } from 'pdf-lib';
 import { env } from '../../config/env.js';
 import { query, queryOne, queryMany } from '../../lib/db.js';
 import { authMiddleware } from '../../middleware/auth.js';
@@ -528,21 +527,7 @@ export async function registerMlMiscRoutes(app: FastifyInstance) {
 
     const pdfBuffer = Buffer.from(await pdfRes.arrayBuffer());
 
-    // Remove page 3+ from PDF (keep only etiqueta + declaração de conteúdo)
-    try {
-      const pdfDoc = await PDFDocument.load(pdfBuffer);
-      const pageCount = pdfDoc.getPageCount();
-      if (pageCount > 2) {
-        for (let i = pageCount - 1; i >= 2; i--) {
-          pdfDoc.removePage(i);
-        }
-        const cleanPdf = await pdfDoc.save();
-        return reply.type('application/pdf').send(Buffer.from(cleanPdf));
-      }
-    } catch (pdfErr) {
-      logger.warn({ err: pdfErr }, 'Could not process PDF, returning original');
-    }
-
+    // Return full PDF as-is — includes etiqueta + DC-e/DACE + any other required docs
     return reply.type('application/pdf').send(pdfBuffer);
   });
 
