@@ -270,7 +270,10 @@ const Dashboard = () => {
                 </thead>
                 <tbody>
                   {recentOrders.map((order) => {
-                    const config = orderStatusConfig[order.status] ?? orderStatusConfig.pending;
+                    const isApprovedWaitingLabel = (order.status === "approved" || order.status === "confirmed") && !order.tracking_code;
+                    const config = isApprovedWaitingLabel
+                      ? { label: "Aguardando Etiqueta", badgeStatus: "pending" }
+                      : orderStatusConfig[order.status] ?? orderStatusConfig.pending;
                     return (
                       <tr key={order.id} className="border-b border-border/50 hover:bg-secondary/30 transition-colors">
                         <td className="py-3 font-mono font-medium text-foreground">#{order.order_number}</td>

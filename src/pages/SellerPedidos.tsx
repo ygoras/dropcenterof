@@ -192,7 +192,10 @@ const SellerPedidos = () => {
               </thead>
               <tbody>
                 {filtered.map((order) => {
-                  const config = orderStatusFlow[order.status] ?? orderStatusFlow.pending;
+                  const isApprovedWaitingLabel = (order.status === "approved" || order.status === "confirmed") && !order.tracking_code;
+                  const config = isApprovedWaitingLabel
+                    ? { label: "Aguardando Etiqueta", badgeStatus: "pending", icon: Clock }
+                    : orderStatusFlow[order.status] ?? orderStatusFlow.pending;
                   return (
                     <tr key={order.id} className="border-b border-border/50 hover:bg-secondary/20 transition-colors">
                       <td className="py-3 px-4">

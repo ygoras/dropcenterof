@@ -182,7 +182,10 @@ const Pedidos = () => {
               </thead>
               <tbody>
                 {filtered.map((order) => {
-                  const config = orderStatusFlow[order.status] ?? orderStatusFlow.pending;
+                  const isApprovedWaitingLabel = (order.status === "approved" || order.status === "confirmed") && !order.tracking_code;
+                  const config = isApprovedWaitingLabel
+                    ? { label: "Aguardando Etiqueta", badgeStatus: "pending", icon: Clock }
+                    : orderStatusFlow[order.status] ?? orderStatusFlow.pending;
                   const next = nextStatus[order.status];
 
                   return (
