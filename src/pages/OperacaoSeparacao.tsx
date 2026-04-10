@@ -37,7 +37,7 @@ const OperacaoSeparacao = () => {
       api.get<any[]>("/api/orders?status=approved,confirmed&order=created_at.asc&fields=id,status,tenant_id,created_at,order_number,customer_name,items,tracking_code,claim_status"),
       api.get<any[]>("/api/tenants?fields=id,name"),
       api.get<any[]>("/api/products?fields=id,name,sku,category"),
-      api.get<any[]>("/api/shipments?fields=id,order_id,ml_shipment_id,tracking_code,label_url"),
+      api.get<any[]>("/api/shipments?fields=id,order_id,ml_shipment_id,tracking_code,label_url,logistic_type"),
     ]).then(res => res.map(r => r ?? []));
 
     const tenantMap = Object.fromEntries(tenants.map((t: any) => [t.id, t.name]));
@@ -76,6 +76,7 @@ const OperacaoSeparacao = () => {
         ml_shipment_id: shipment?.ml_shipment_id,
         tracking_code: shipment?.tracking_code,
         label_url: shipment?.label_url,
+        logistic_type: shipment?.logistic_type || null,
       };
     });
 
@@ -356,6 +357,25 @@ const OperacaoSeparacao = () => {
                             <span key={idx} className="text-sm font-bold text-foreground">x{i.quantity}</span>
                           ))}
                         </div>
+                        {order.logistic_type && (
+                          <span className={`text-[9px] font-semibold px-2 py-0.5 rounded-full border ${
+                            ['drop_off','cross_docking','xd_drop_off'].includes(order.logistic_type)
+                              ? 'bg-blue-500/10 text-blue-500 border-blue-500/30'
+                              : order.logistic_type === 'self_service'
+                              ? 'bg-orange-500/10 text-orange-500 border-orange-500/30'
+                              : order.logistic_type === 'fulfillment'
+                              ? 'bg-purple-500/10 text-purple-500 border-purple-500/30'
+                              : 'bg-secondary text-muted-foreground border-border'
+                          }`}>
+                            {['drop_off','cross_docking','xd_drop_off'].includes(order.logistic_type)
+                              ? 'Correios'
+                              : order.logistic_type === 'self_service'
+                              ? 'FLEX'
+                              : order.logistic_type === 'fulfillment'
+                              ? 'Full'
+                              : order.logistic_type}
+                          </span>
+                        )}
                         <StatusBadge status={order.order_status} />
                       </div>
                     ))}

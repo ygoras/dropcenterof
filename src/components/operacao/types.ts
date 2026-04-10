@@ -12,6 +12,7 @@ export interface OrderTask {
   ml_shipment_id?: string;
   tracking_code?: string;
   label_url?: string;
+  logistic_type?: string | null;
 }
 
 export interface OrderItem {

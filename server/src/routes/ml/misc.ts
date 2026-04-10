@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+import { PDFDocument } from 'pdf-lib';
 import { env } from '../../config/env.js';
 import { query, queryOne, queryMany } from '../../lib/db.js';
 import { authMiddleware } from '../../middleware/auth.js';
@@ -516,8 +517,29 @@ export async function registerMlMiscRoutes(app: FastifyInstance) {
       return reply.status(400).send({ error: 'Credenciais ML não encontradas' });
     }
 
+    // Check logistic_type for each shipment — Correios (drop_off/cross_docking) needs DACE
+    const firstShipmentId = shipmentIds.split(',')[0];
+    let isCorreios = false;
+    try {
+      const shipRes = await fetch(`${ML_API}/shipments/${firstShipmentId}`, {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          Accept: 'application/json',
+          'x-format-new': 'true',
+        },
+      });
+      if (shipRes.ok) {
+        const shipData: any = await shipRes.json();
+        const logisticType = shipData.logistic_type || shipData.logistic?.type || '';
+        // Correios shipments have logistic_type drop_off, cross_docking, or xd_drop_off
+        isCorreios = ['drop_off', 'cross_docking', 'xd_drop_off'].includes(logisticType);
+        logger.info({ shipmentIds, logisticType, isCorreios }, 'Detected logistic type for label');
+      }
+    } catch (err) {
+      logger.warn({ err }, 'Could not detect logistic type');
+    }
+
     // savePdf=Y instructs ML to include extra documents like DC-e/DACE when applicable
-    // (only shipments via Correios with drop_off/cross_docking logistic_type)
     const pdfRes = await fetch(
       `${ML_API}/shipment_labels?shipment_ids=${shipmentIds}&response_type=pdf&savePdf=Y`,
       {
@@ -535,9 +557,27 @@ export async function registerMlMiscRoutes(app: FastifyInstance) {
     }
 
     const pdfBuffer = Buffer.from(await pdfRes.arrayBuffer());
-    logger.info({ shipmentIds, bytes: pdfBuffer.length }, 'Label PDF fetched from ML');
+    logger.info({ shipmentIds, bytes: pdfBuffer.length, isCorreios }, 'Label PDF fetched from ML');
 
-    // Return full PDF as-is — includes etiqueta + DC-e/DACE + any other required docs
+    // For non-Correios shipments, keep only page 1 (just the label)
+    // For Correios, keep all pages (label + DACE + any extras)
+    if (!isCorreios) {
+      try {
+        const pdfDoc = await PDFDocument.load(pdfBuffer);
+        const pageCount = pdfDoc.getPageCount();
+        if (pageCount > 1) {
+          for (let i = pageCount - 1; i >= 1; i--) {
+            pdfDoc.removePage(i);
+          }
+          const cleanPdf = await pdfDoc.save();
+          return reply.type('application/pdf').send(Buffer.from(cleanPdf));
+        }
+      } catch (pdfErr) {
+        logger.warn({ err: pdfErr }, 'Could not process PDF, returning original');
+      }
+    }
+
+    // Correios or single-page PDF: return as-is
     return reply.type('application/pdf').send(pdfBuffer);
   });
 
