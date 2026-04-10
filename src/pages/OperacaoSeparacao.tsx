@@ -34,7 +34,7 @@ const OperacaoSeparacao = () => {
   const fetchData = useCallback(async () => {
     setLoading(true);
     const [orders, tenants, products, shipments] = await Promise.all([
-      api.get<any[]>("/api/orders?status=approved,confirmed&order=created_at.asc&fields=id,status,tenant_id,created_at,order_number,customer_name,items"),
+      api.get<any[]>("/api/orders?status=approved,confirmed&order=created_at.asc&fields=id,status,tenant_id,created_at,order_number,customer_name,items,tracking_code,claim_status"),
       api.get<any[]>("/api/tenants?fields=id,name"),
       api.get<any[]>("/api/products?fields=id,name,sku,category"),
       api.get<any[]>("/api/shipments?fields=id,order_id,ml_shipment_id,tracking_code,label_url"),
@@ -48,7 +48,8 @@ const OperacaoSeparacao = () => {
     const filteredOrders = orders.filter((order: any) => {
       const hasNoClaim = !order.claim_status || order.claim_status !== 'opened';
       const shipment = shipmentMap[order.id];
-      const hasLabel = !!(shipment?.tracking_code);
+      // tracking_code can come from orders table OR shipments table (both webhook flows update it)
+      const hasLabel = !!(order.tracking_code || shipment?.tracking_code);
       return hasNoClaim && hasLabel;
     });
 
