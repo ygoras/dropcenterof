@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { formatCurrency, formatDateTime as formatDate } from "@/lib/formatters";
 import {
   ShoppingCart,
@@ -13,9 +13,14 @@ import {
   Eye,
   Copy,
   Store,
+  Printer,
+  RefreshCw,
+  X,
 } from "lucide-react";
+import { createPortal } from "react-dom";
 import { StatusBadge } from "@/components/StatusBadge";
 import { useOrders } from "@/hooks/useOrders";
+import { api } from "@/lib/apiClient";
 import {
   Select,
   SelectContent,
@@ -51,6 +56,14 @@ const orderStatusFlow: Record<string, { label: string; badgeStatus: string; icon
 import { useMlCredentials } from "@/hooks/useMlCredentials";
 import { getMlStatusLabel, getClaimBadge } from "@/lib/mlStatusLabels";
 
+interface ShipmentLite {
+  id: string;
+  order_id: string;
+  ml_shipment_id: string | null;
+  tracking_code: string | null;
+  logistic_type: string | null;
+}
+
 const SellerPedidos = () => {
   const { orders, loading } = useOrders();
   const { credentials } = useMlCredentials();
@@ -58,6 +71,54 @@ const SellerPedidos = () => {
   const [statusFilter, setStatusFilter] = useState("all");
   const [storeFilter, setStoreFilter] = useState("all");
   const [detailOrder, setDetailOrder] = useState<typeof orders[0] | null>(null);
+  const [shipments, setShipments] = useState<Record<string, ShipmentLite>>({});
+  const [labelPdfUrl, setLabelPdfUrl] = useState<string | null>(null);
+  const [loadingLabel, setLoadingLabel] = useState(false);
+
+  useEffect(() => {
+    api.get<ShipmentLite[]>("/api/shipments?fields=id,order_id,ml_shipment_id,tracking_code,logistic_type&limit=200")
+      .then(data => {
+        const map: Record<string, ShipmentLite> = {};
+        for (const s of data ?? []) map[s.order_id] = s;
+        setShipments(map);
+      })
+      .catch(() => { /* ignore */ });
+  }, []);
+
+  // Auto-sync logistic_type on mount (non-blocking)
+  useEffect(() => {
+    api.post("/api/shipments/sync-logistics", {}).then(() => {
+      api.get<ShipmentLite[]>("/api/shipments?fields=id,order_id,ml_shipment_id,tracking_code,logistic_type&limit=200")
+        .then(data => {
+          const map: Record<string, ShipmentLite> = {};
+          for (const s of data ?? []) map[s.order_id] = s;
+          setShipments(map);
+        });
+    }).catch(() => { /* ignore */ });
+  }, []);
+
+  const handleViewLabel = async (orderId: string) => {
+    const shipment = shipments[orderId];
+    if (!shipment?.ml_shipment_id) {
+      toast({ title: "Etiqueta indisponível", description: "Este pedido não tem etiqueta disponível no ML", variant: "destructive" });
+      return;
+    }
+    setLoadingLabel(true);
+    try {
+      const clerkToken = await (window as any).Clerk?.session?.getToken();
+      const res = await fetch(`/api/ml/label-pdf/${shipment.ml_shipment_id}`, {
+        headers: { 'Authorization': `Bearer ${clerkToken}` },
+      });
+      if (res.ok) {
+        const blob = await res.blob();
+        setLabelPdfUrl(URL.createObjectURL(blob));
+      } else {
+        toast({ title: "Erro ao buscar etiqueta", variant: "destructive" });
+      }
+    } finally {
+      setLoadingLabel(false);
+    }
+  };
 
   const filtered = orders.filter((o) => {
     const matchSearch =
@@ -244,12 +305,25 @@ const SellerPedidos = () => {
                       </td>
                       <td className="py-3 px-4 text-muted-foreground text-xs">{formatDate(order.created_at)}</td>
                       <td className="py-3 px-4 text-right">
-                        <button
-                          onClick={() => setDetailOrder(order)}
-                          className="p-1.5 rounded-lg hover:bg-secondary transition-colors text-muted-foreground hover:text-foreground"
-                        >
-                          <Eye className="w-4 h-4" />
-                        </button>
+                        <div className="flex items-center justify-end gap-1">
+                          {shipments[order.id]?.ml_shipment_id && order.tracking_code && (
+                            <button
+                              onClick={() => handleViewLabel(order.id)}
+                              disabled={loadingLabel}
+                              title="Ver Etiqueta"
+                              className="p-1.5 rounded-lg hover:bg-secondary transition-colors text-muted-foreground hover:text-primary disabled:opacity-50"
+                            >
+                              {loadingLabel ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Printer className="w-4 h-4" />}
+                            </button>
+                          )}
+                          <button
+                            onClick={() => setDetailOrder(order)}
+                            title="Detalhes"
+                            className="p-1.5 rounded-lg hover:bg-secondary transition-colors text-muted-foreground hover:text-foreground"
+                          >
+                            <Eye className="w-4 h-4" />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );
@@ -336,6 +410,53 @@ const SellerPedidos = () => {
           )}
         </DialogContent>
       </Dialog>
+
+      {/* Label PDF Modal */}
+      {labelPdfUrl && createPortal(
+        <>
+          <div
+            className="fixed inset-0 bg-black/60"
+            style={{ zIndex: 99998 }}
+            onClick={() => { URL.revokeObjectURL(labelPdfUrl); setLabelPdfUrl(null); }}
+          />
+          <div
+            className="fixed flex items-center justify-center"
+            style={{ zIndex: 99999, top: 0, left: 0, right: 0, bottom: 0 }}
+          >
+            <div className="flex flex-col bg-card rounded-xl shadow-2xl border border-border overflow-hidden" style={{ width: '70%', height: '85vh', maxWidth: '900px' }}>
+              <div className="flex items-center justify-between px-4 py-3 border-b border-border shrink-0 bg-card">
+                <h3 className="text-base font-bold text-foreground flex items-center gap-2">
+                  <Printer className="w-5 h-5 text-primary" /> Etiqueta de Envio
+                </h3>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => {
+                      const iframe = document.getElementById('seller-label-iframe') as HTMLIFrameElement;
+                      if (iframe?.contentWindow) iframe.contentWindow.print();
+                    }}
+                    className="px-4 py-2 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 text-sm font-semibold flex items-center gap-2"
+                  >
+                    <Printer className="w-4 h-4" /> Imprimir
+                  </button>
+                  <button
+                    onClick={() => { URL.revokeObjectURL(labelPdfUrl); setLabelPdfUrl(null); }}
+                    className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+              </div>
+              <iframe
+                id="seller-label-iframe"
+                src={labelPdfUrl}
+                className="w-full border-0 flex-1"
+                title="Etiqueta"
+              />
+            </div>
+          </div>
+        </>,
+        document.body
+      )}
     </div>
   );
 };

@@ -138,4 +138,54 @@ export async function registerShipmentRoutes(app: FastifyInstance) {
 
     return result;
   });
+
+  // Backfill logistic_type for existing shipments — admin/manager
+  app.post('/api/shipments/sync-logistics', {
+    preHandler: [authMiddleware, requireRole('admin', 'manager', 'operator', 'seller')],
+  }, async (request, reply) => {
+    const ML_API = 'https://api.mercadolibre.com';
+    const { tenantId, isAdmin } = getTenantFilter(request);
+
+    // Fetch shipments without logistic_type that have ml_shipment_id
+    const tenantFilter = !isAdmin && tenantId ? 'AND o.tenant_id = $1' : '';
+    const params = !isAdmin && tenantId ? [tenantId] : [];
+
+    const shipments = await queryMany<{ id: string; ml_shipment_id: string; tenant_id: string }>(
+      `SELECT s.id, s.ml_shipment_id, o.tenant_id
+       FROM shipments s
+       JOIN orders o ON o.id = s.order_id
+       WHERE s.logistic_type IS NULL AND s.ml_shipment_id IS NOT NULL ${tenantFilter}
+       LIMIT 100`,
+      params
+    );
+
+    let updated = 0;
+    for (const ship of shipments) {
+      const cred = await queryOne<{ access_token: string }>(
+        `SELECT access_token FROM ml_credentials WHERE tenant_id = $1 LIMIT 1`,
+        [ship.tenant_id]
+      );
+      if (!cred?.access_token) continue;
+
+      try {
+        const shipRes = await fetch(`${ML_API}/shipments/${ship.ml_shipment_id}`, {
+          headers: {
+            Authorization: `Bearer ${cred.access_token}`,
+            Accept: 'application/json',
+            'x-format-new': 'true',
+          },
+        });
+        if (!shipRes.ok) continue;
+
+        const shipData: any = await shipRes.json();
+        const logisticType = shipData.logistic_type || shipData.logistic?.type || null;
+        if (logisticType) {
+          await query(`UPDATE shipments SET logistic_type = $1 WHERE id = $2`, [logisticType, ship.id]);
+          updated++;
+        }
+      } catch { /* skip */ }
+    }
+
+    return reply.send({ total: shipments.length, updated });
+  });
 }
