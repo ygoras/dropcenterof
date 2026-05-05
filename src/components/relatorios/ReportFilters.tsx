@@ -19,6 +19,10 @@ interface ReportFiltersProps {
 export function ReportFilters({ filters, onChange, tenants, categories, showTenantFilter = true }: ReportFiltersProps) {
   const update = (patch: Partial<AnalyticsFilters>) => onChange({ ...filters, ...patch });
 
+  // Defensive dedupe — even if backend returns duplicates, dropdown shows each tenant once
+  const uniqueTenants = Array.from(new Map(tenants.map((t) => [t.id, t])).values());
+  const uniqueCategories = Array.from(new Map(categories.map((c) => [c.id, c])).values());
+
   return (
     <div className="flex flex-wrap items-center gap-3">
       <div className="flex items-center gap-2">
@@ -44,7 +48,7 @@ export function ReportFilters({ filters, onChange, tenants, categories, showTena
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">Todos vendedores</SelectItem>
-            {tenants.map((t) => (
+            {uniqueTenants.map((t) => (
               <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
             ))}
           </SelectContent>
@@ -58,7 +62,7 @@ export function ReportFilters({ filters, onChange, tenants, categories, showTena
         </SelectTrigger>
         <SelectContent>
           <SelectItem value="all">Todas categorias</SelectItem>
-          {categories.map((c) => (
+          {uniqueCategories.map((c) => (
             <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
           ))}
         </SelectContent>

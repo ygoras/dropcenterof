@@ -10,13 +10,18 @@ export async function registerAnalyticsRoutes(app: FastifyInstance) {
     preHandler: [authMiddleware],
   }, async (request) => {
     const { tenantId, isAdmin } = getTenantFilter(request);
-    const tenantCondition = !isAdmin && tenantId ? `WHERE tenant_id = '${tenantId}'` : '';
+
+    // Parameterized tenant filter — never interpolate user-derived values into SQL
+    const useTenantFilter = !isAdmin && tenantId;
+    const whereTenant = useTenantFilter ? `WHERE tenant_id = $1` : '';
+    const andTenant = useTenantFilter ? `AND tenant_id = $1` : '';
+    const tenantParam = useTenantFilter ? [tenantId] : [];
 
     const [orders, revenue, products, listings] = await Promise.all([
-      queryOne(`SELECT COUNT(*) as total, COUNT(*) FILTER (WHERE status = 'pending') as pending FROM orders ${tenantCondition}`),
-      queryOne(`SELECT COALESCE(SUM(total), 0) as total FROM orders ${tenantCondition} WHERE created_at >= DATE_TRUNC('month', NOW())`),
-      queryOne(`SELECT COUNT(*) as total FROM products ${tenantCondition}`),
-      queryOne(`SELECT COUNT(*) as total, COUNT(*) FILTER (WHERE status = 'active') as active FROM ml_listings ${tenantCondition}`),
+      queryOne(`SELECT COUNT(*) as total, COUNT(*) FILTER (WHERE status = 'pending') as pending FROM orders ${whereTenant}`, tenantParam),
+      queryOne(`SELECT COALESCE(SUM(total), 0) as total FROM orders WHERE created_at >= DATE_TRUNC('month', NOW()) ${andTenant}`, tenantParam),
+      queryOne(`SELECT COUNT(*) as total FROM products ${whereTenant}`, tenantParam),
+      queryOne(`SELECT COUNT(*) as total, COUNT(*) FILTER (WHERE status = 'active') as active FROM ml_listings ${whereTenant}`, tenantParam),
     ]);
 
     return { orders, revenue, products, listings };
@@ -40,7 +45,8 @@ export async function registerAnalyticsRoutes(app: FastifyInstance) {
   app.get('/api/analytics/filters', {
     preHandler: [authMiddleware],
   }, async () => {
-    const tenants = await queryMany(`SELECT id, name FROM tenants ORDER BY name`);
+    // Only active tenants in filters; suspended/inactive hidden but not deleted
+    const tenants = await queryMany(`SELECT id, name FROM tenants WHERE status = 'active' ORDER BY name`);
     const categories = await queryMany(
       `SELECT DISTINCT category_id as id, category_id as name FROM ml_listings WHERE category_id IS NOT NULL ORDER BY category_id`
     );
@@ -110,27 +116,33 @@ export async function registerAnalyticsRoutes(app: FastifyInstance) {
     const costCol = isAdmin ? 'p.cost_price' : 'p.sell_price';
 
     // Totals — compute real cost (per item × quantity), logistics (admin only), and avg ticket
+    // Use LEFT JOIN LATERAL so orders without items still count for revenue/orders
     const totalsRow = await queryOne(
-      `WITH order_items AS (
-         SELECT o.id as oid, o.total, o.shipping_cost, item, p.cost_price, p.sell_price, p.logistics_cost
+      `WITH base_orders AS (
+         SELECT o.id as oid, o.total, o.shipping_cost
          FROM orders o
-         CROSS JOIN LATERAL jsonb_array_elements(o.items) item
-         LEFT JOIN products p ON p.id = (item->>'product_id')::uuid
          WHERE ${where}
        ),
-       order_totals AS (
-         SELECT DISTINCT oid, total, shipping_cost FROM order_items
+       order_items AS (
+         SELECT o.id as oid, item, p.cost_price, p.sell_price, p.logistics_cost
+         FROM orders o
+         LEFT JOIN LATERAL jsonb_array_elements(COALESCE(o.items, '[]'::jsonb)) item ON TRUE
+         LEFT JOIN products p ON p.id = (item->>'product_id')::uuid
+         WHERE ${where}
        )
        SELECT
-         (SELECT COALESCE(SUM(total), 0) FROM order_totals) as revenue,
-         (SELECT COALESCE(SUM((item->>'quantity')::int * COALESCE(${costCol}, 0)), 0) FROM order_items) as cost,
-         (SELECT COALESCE(SUM((item->>'quantity')::int * COALESCE(logistics_cost, 0)), 0) FROM order_items) as logistics_cost,
-         (SELECT COALESCE(SUM(shipping_cost), 0) FROM order_totals) as shipping,
+         (SELECT COALESCE(SUM(total), 0) FROM base_orders) as revenue,
+         (SELECT COALESCE(SUM((item->>'quantity')::int * COALESCE(${costCol}, 0)), 0)
+            FROM order_items WHERE item IS NOT NULL) as cost,
+         (SELECT COALESCE(SUM((item->>'quantity')::int * COALESCE(logistics_cost, 0)), 0)
+            FROM order_items WHERE item IS NOT NULL) as logistics_cost,
+         (SELECT COALESCE(SUM(shipping_cost), 0) FROM base_orders) as shipping,
          0 as fees,
-         (SELECT COUNT(*) FROM order_totals) as orders,
-         (SELECT COALESCE(SUM((item->>'quantity')::int), 0) FROM order_items) as items_sold,
-         CASE WHEN (SELECT COUNT(*) FROM order_totals) > 0
-              THEN (SELECT SUM(total) FROM order_totals) / (SELECT COUNT(*) FROM order_totals)
+         (SELECT COUNT(*) FROM base_orders) as orders,
+         (SELECT COALESCE(SUM((item->>'quantity')::int), 0)
+            FROM order_items WHERE item IS NOT NULL) as items_sold,
+         CASE WHEN (SELECT COUNT(*) FROM base_orders) > 0
+              THEN (SELECT SUM(total) FROM base_orders) / (SELECT COUNT(*) FROM base_orders)
               ELSE 0 END as avg_ticket`,
       params
     );

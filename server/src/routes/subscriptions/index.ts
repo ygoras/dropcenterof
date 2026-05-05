@@ -7,6 +7,7 @@ import { queryMany, queryOne, query } from '../../lib/db.js';
 import { getTenantFilter } from '../../middleware/tenantScope.js';
 import { env } from '../../config/env.js';
 import { logger } from '../../lib/logger.js';
+import { logAudit } from '../../lib/audit.js';
 
 const ASAAS_API = env.ASAAS_SANDBOX
   ? 'https://sandbox.asaas.com/api/v3'
@@ -78,6 +79,30 @@ export async function registerSubscriptionRoutes(app: FastifyInstance) {
   }, async (request, reply) => {
     const { subscriptionId } = request.params as { subscriptionId: string };
     const { status, plan_id } = request.body as { status?: string; plan_id?: string };
+    const adminUserId = request.user.sub;
+
+    // Validate plan_id if provided — prevent dangling references
+    if (plan_id) {
+      const plan = await queryOne<{ id: string }>(
+        `SELECT id FROM plans WHERE id = $1 AND is_active = true`,
+        [plan_id]
+      );
+      if (!plan) {
+        return reply.status(400).send({ error: 'Plano inválido ou inativo' });
+      }
+    }
+
+    // Validate status if provided
+    if (status && !['active', 'pending', 'overdue', 'blocked', 'cancelled'].includes(status)) {
+      return reply.status(400).send({ error: 'Status inválido' });
+    }
+
+    // Capture pre-update state for audit
+    const before = await queryOne<{ id: string; tenant_id: string; status: string; plan_id: string }>(
+      `SELECT id, tenant_id, status, plan_id FROM subscriptions WHERE id = $1`,
+      [subscriptionId]
+    );
+    if (!before) return reply.status(404).send({ error: 'Assinatura não encontrada' });
 
     const setClauses: string[] = [];
     const params: unknown[] = [];
@@ -95,6 +120,13 @@ export async function registerSubscriptionRoutes(app: FastifyInstance) {
     );
 
     if (!sub) return reply.status(404).send({ error: 'Assinatura não encontrada' });
+
+    // Audit log
+    await logAudit(adminUserId, 'subscription_updated', 'subscription', subscriptionId, {
+      tenant_id: before.tenant_id,
+      old: { status: before.status, plan_id: before.plan_id },
+      new: { status: status ?? before.status, plan_id: plan_id ?? before.plan_id },
+    });
 
     // When plan changes: cancel old pending/expired charges and reactivate subscription
     if (plan_id) {

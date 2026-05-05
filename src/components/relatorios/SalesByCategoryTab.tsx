@@ -24,6 +24,9 @@ export function SalesByCategoryTab({ data }: { data: SalesByCategoryRow[] }) {
     );
   }
 
+  // Show Logística column only if any row has logistics_cost > 0 (admin only)
+  const hasLogistics = data.some((d) => (d.logistics_cost ?? 0) > 0);
+
   const pieData = data.slice(0, 6).map((d) => ({
     name: d.category_name.length > 20 ? d.category_name.slice(0, 20) + "…" : d.category_name,
     value: d.revenue,
@@ -70,6 +73,9 @@ export function SalesByCategoryTab({ data }: { data: SalesByCategoryRow[] }) {
                 <th className="text-left py-3 px-4 text-muted-foreground font-medium">Categoria</th>
                 <th className="text-right py-3 px-4 text-muted-foreground font-medium">Qtd.</th>
                 <th className="text-right py-3 px-4 text-muted-foreground font-medium">Receita</th>
+                {hasLogistics && (
+                  <th className="text-right py-3 px-4 text-muted-foreground font-medium">Logística</th>
+                )}
               </tr>
             </thead>
             <tbody>
@@ -78,6 +84,9 @@ export function SalesByCategoryTab({ data }: { data: SalesByCategoryRow[] }) {
                   <td className="py-3 px-4 text-foreground font-medium">{row.category_name}</td>
                   <td className="py-3 px-4 text-right text-foreground">{row.quantity_sold}</td>
                   <td className="py-3 px-4 text-right font-semibold text-foreground">{formatCurrency(row.revenue)}</td>
+                  {hasLogistics && (
+                    <td className="py-3 px-4 text-right text-orange-500">{formatCurrency(row.logistics_cost ?? 0)}</td>
+                  )}
                 </tr>
               ))}
             </tbody>

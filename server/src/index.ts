@@ -139,7 +139,7 @@ async function start() {
   });
 
   // Asaas sends webhooks to /api/webhooks/asaas — proxy to internal handler
-  app.post('/api/webhooks/asaas', async (request, reply) => {
+  app.post('/api/webhooks/asaas', { config: { rateLimit: { max: 1000, timeWindow: '1 minute' } } }, async (request, reply) => {
     const asaasToken = request.headers['asaas-access-token'] as string | undefined;
 
     const res = await app.inject({

@@ -6,6 +6,7 @@ import { validateBody } from '../../middleware/validateBody.js';
 import { queryMany, queryOne, query } from '../../lib/db.js';
 import { getTenantFilter } from '../../middleware/tenantScope.js';
 import { logger } from '../../lib/logger.js';
+import { logAudit } from '../../lib/audit.js';
 
 export async function registerWalletRoutes(app: FastifyInstance) {
   // Get wallet balance
@@ -22,7 +23,7 @@ export async function registerWalletRoutes(app: FastifyInstance) {
     }
 
     const balance = await queryOne(
-      `SELECT * FROM wallet_balances WHERE tenant_id = $1`,
+      `SELECT tenant_id, balance, special_credit, updated_at FROM wallet_balances WHERE tenant_id = $1`,
       [targetTenantId]
     );
 
@@ -30,15 +31,33 @@ export async function registerWalletRoutes(app: FastifyInstance) {
   });
 
   // Admin: grant special credit to a seller
+  // Hard cap of R$ 3.000 per operation (anti-fraud); larger grants must be split.
   app.post('/api/admin/wallet/grant-special-credit', {
+    config: { rateLimit: { max: 5, timeWindow: '1 minute' } },
     preHandler: [authMiddleware, requireRole('admin', 'manager'), validateBody(z.object({
       tenant_id: z.string().uuid(),
-      amount: z.number().min(0.01),
+      amount: z.number()
+        .min(0.01, 'Valor mínimo: R$ 0,01')
+        .max(3000, 'Limite por operação: R$ 3.000,00')
+        .refine(a => Number.isFinite(a) && Math.round(a * 100) === a * 100,
+          'Valor deve ter no máximo 2 casas decimais'),
       description: z.string().max(500).optional(),
     }))],
   }, async (request, reply) => {
     const body = request.body as { tenant_id: string; amount: number; description?: string };
     const adminUserId = request.user.sub;
+
+    // Verify tenant exists and is active
+    const tenant = await queryOne<{ id: string; status: string; name: string }>(
+      `SELECT id, status, name FROM tenants WHERE id = $1`,
+      [body.tenant_id]
+    );
+    if (!tenant) {
+      return reply.status(404).send({ error: 'Vendedor não encontrado' });
+    }
+    if (tenant.status !== 'active') {
+      return reply.status(400).send({ error: 'Vendedor inativo — não é possível conceder crédito' });
+    }
 
     // Atomically increment special_credit and record the transaction
     const updated = await queryOne<{ tenant_id: string; balance: number; special_credit: number }>(
@@ -69,16 +88,13 @@ export async function registerWalletRoutes(app: FastifyInstance) {
       ]
     );
 
-    // Audit log (non-blocking)
-    try {
-      await query(
-        `INSERT INTO audit_logs (user_id, action, entity_type, entity_id, details)
-         VALUES ($1, 'special_credit_granted', 'tenant', $2, $3)`,
-        [adminUserId, body.tenant_id, JSON.stringify({ amount: body.amount, description: body.description })]
-      );
-    } catch (err) {
-      logger.warn({ err }, 'Audit log insert failed');
-    }
+    // Audit log
+    await logAudit(adminUserId, 'special_credit_granted', 'tenant', body.tenant_id, {
+      amount: body.amount,
+      description: body.description,
+      tenant_name: tenant.name,
+      special_credit_after: Number(updated.special_credit),
+    });
 
     return reply.send({
       success: true,
@@ -101,8 +117,13 @@ export async function registerWalletRoutes(app: FastifyInstance) {
     const limitVal = Math.min(parseInt(limit ?? '50'), 100);
     const offsetVal = parseInt(offset ?? '0');
 
+    // Explicit columns — admins can see metadata; sellers cannot (hides granted_by etc.)
+    const cols = isAdmin
+      ? `id, tenant_id, type, amount, balance_after, status, description, reference_id, reference_type, metadata, created_at, confirmed_at`
+      : `id, tenant_id, type, amount, balance_after, status, description, reference_id, reference_type, created_at, confirmed_at`;
+
     return queryMany(
-      `SELECT * FROM wallet_transactions
+      `SELECT ${cols} FROM wallet_transactions
        WHERE tenant_id = $1
        ORDER BY created_at DESC
        LIMIT $2 OFFSET $3`,

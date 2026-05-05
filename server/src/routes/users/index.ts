@@ -7,6 +7,7 @@ import { validateBody } from '../../middleware/validateBody.js';
 import * as authService from '../../services/authService.js';
 import { queryMany, queryOne, query } from '../../lib/db.js';
 import { getTenantFilter } from '../../middleware/tenantScope.js';
+import { logAudit } from '../../lib/audit.js';
 
 const createSellerSchema = z.object({
   email: z.string().email(),
@@ -29,9 +30,25 @@ const createOperatorSchema = z.object({
 export async function registerUserRoutes(app: FastifyInstance) {
   // Create seller (admin only)
   app.post('/api/users/sellers', {
+    config: { rateLimit: { max: 10, timeWindow: '1 minute' } },
     preHandler: [authMiddleware, requireRole('admin', 'manager'), validateBody(createSellerSchema)],
   }, async (request, reply) => {
     const body = request.body as z.infer<typeof createSellerSchema>;
+
+    // Prevent creating duplicate tenants for same document (CNPJ/CPF)
+    if (body.company_document) {
+      const existing = await queryOne<{ id: string; name: string }>(
+        `SELECT id, name FROM tenants WHERE document = $1 LIMIT 1`,
+        [body.company_document]
+      );
+      if (existing) {
+        return reply.status(409).send({
+          error: 'J\u00e1 existe um vendedor cadastrado com este CNPJ/CPF',
+          existing_tenant_id: existing.id,
+          existing_tenant_name: existing.name,
+        });
+      }
+    }
 
     // Create tenant first
     const slug = body.company_name
@@ -76,6 +93,14 @@ export async function registerUserRoutes(app: FastifyInstance) {
           [tenant.id, plan.id, billingDay]
         );
       }
+
+      // Audit log (creation of seller)
+      await logAudit(request.user.sub, 'seller_created', 'tenant', tenant.id, {
+        seller_email: body.email,
+        seller_name: body.name,
+        company_name: body.company_name,
+        plan_id: body.plan_id ?? null,
+      });
 
       return reply.status(201).send(user);
     } catch (err: any) {
@@ -207,6 +232,12 @@ export async function registerUserRoutes(app: FastifyInstance) {
         logger.warn({ sellerId }, 'Failed to unban user in Clerk');
       }
     }
+
+    // Audit log
+    await logAudit(request.user.sub, 'seller_updated', 'profile', sellerId, {
+      tenant_id: profile.tenant_id,
+      changes: body,
+    });
 
     return { success: true };
   });

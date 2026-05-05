@@ -98,13 +98,23 @@ export async function registerMlWebhookRoutes(app: FastifyInstance) {
   // ─── ML Webhook (no auth - external webhook) ───────────────────────
   // CRITICAL: ML requires HTTP 200 within 500ms or it disables topics!
   // We respond immediately and process asynchronously.
-  app.post('/api/webhooks/ml', async (request, reply) => {
-    // Optional HMAC signature verification
-    if (env.ML_WEBHOOK_SECRET) {
+  app.post('/api/webhooks/ml', { config: { rateLimit: { max: 1000, timeWindow: '1 minute' } } }, async (request, reply) => {
+    // HMAC signature verification — MANDATORY in production
+    const secret = env.ML_WEBHOOK_SECRET;
+    if (env.NODE_ENV === 'production' && !secret) {
+      logger.error('ML_WEBHOOK_SECRET missing in production — webhook rejected');
+      return reply.status(503).send({ error: 'Webhook not configured' });
+    }
+    if (secret) {
       const signature = request.headers['x-signature'] as string | undefined;
-      if (signature) {
+      if (!signature) {
+        if (env.NODE_ENV === 'production') {
+          logger.warn('ML webhook missing x-signature header (prod)');
+          return reply.status(401).send({ error: 'Missing signature' });
+        }
+      } else {
         const rawBody = JSON.stringify(request.body);
-        const expected = hmacSha256(rawBody, env.ML_WEBHOOK_SECRET);
+        const expected = hmacSha256(rawBody, secret);
         if (signature !== expected) {
           logger.warn('ML webhook signature mismatch');
           return reply.status(401).send({ error: 'Invalid signature' });

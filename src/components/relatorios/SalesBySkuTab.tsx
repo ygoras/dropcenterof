@@ -15,6 +15,9 @@ export function SalesBySkuTab({ data }: { data: SalesBySkuRow[] }) {
     );
   }
 
+  // Show Logística column only if any row has logistics_cost > 0 (admin only)
+  const hasLogistics = data.some((d) => (d.logistics_cost ?? 0) > 0);
+
   const chartData = data.slice(0, 10).map((d) => ({
     name: d.sku.length > 12 ? d.sku.slice(0, 12) + "…" : d.sku,
     revenue: d.revenue,
@@ -56,6 +59,9 @@ export function SalesBySkuTab({ data }: { data: SalesBySkuRow[] }) {
                 <th className="text-right py-3 px-4 text-muted-foreground font-medium">Qtd.</th>
                 <th className="text-right py-3 px-4 text-muted-foreground font-medium">Faturamento</th>
                 <th className="text-right py-3 px-4 text-muted-foreground font-medium">Custo</th>
+                {hasLogistics && (
+                  <th className="text-right py-3 px-4 text-muted-foreground font-medium">Logística</th>
+                )}
                 <th className="text-right py-3 px-4 text-muted-foreground font-medium">Frete</th>
                 <th className="text-right py-3 px-4 text-muted-foreground font-medium">Taxas</th>
                 <th className="text-right py-3 px-4 text-muted-foreground font-medium text-success">Líquido</th>
@@ -72,6 +78,9 @@ export function SalesBySkuTab({ data }: { data: SalesBySkuRow[] }) {
                     <td className="py-3 px-4 text-right font-semibold text-foreground">{row.quantity_sold}</td>
                     <td className="py-3 px-4 text-right font-semibold text-foreground">{formatCurrency(row.revenue)}</td>
                     <td className="py-3 px-4 text-right text-destructive">{formatCurrency(row.cost)}</td>
+                    {hasLogistics && (
+                      <td className="py-3 px-4 text-right text-orange-500">{formatCurrency(row.logistics_cost ?? 0)}</td>
+                    )}
                     <td className="py-3 px-4 text-right text-muted-foreground">{formatCurrency(row.shipping)}</td>
                     <td className="py-3 px-4 text-right text-muted-foreground">{formatCurrency(row.fees)}</td>
                     <td className="py-3 px-4 text-right font-semibold text-success">{formatCurrency(row.net)}</td>
