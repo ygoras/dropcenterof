@@ -9,12 +9,16 @@ import {
   UserCheck,
   Filter,
   CreditCard,
+  Gift,
   Trash2,
 } from "lucide-react";
 import { StatusBadge } from "@/components/StatusBadge";
 import { useSellers, SellerWithDetails } from "@/hooks/useSellers";
 import { usePlans } from "@/hooks/usePlans";
 import { SellerFormDialog } from "@/components/sellers/SellerFormDialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
+import { api } from "@/lib/apiClient";
+import { toast } from "@/hooks/use-toast";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -54,7 +58,36 @@ const Vendedores = () => {
   const [statusFilter, setStatusFilter] = useState<string>("active");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingSeller, setEditingSeller] = useState<SellerWithDetails | null>(null);
+  const [creditTarget, setCreditTarget] = useState<SellerWithDetails | null>(null);
+  const [creditAmount, setCreditAmount] = useState("");
+  const [creditDescription, setCreditDescription] = useState("");
+  const [grantingCredit, setGrantingCredit] = useState(false);
   // deleteTarget removed — sellers are only activated/deactivated
+
+  const handleGrantCredit = async () => {
+    if (!creditTarget || !creditTarget.tenant_id) return;
+    const amount = parseFloat(creditAmount);
+    if (!amount || amount <= 0) {
+      toast({ title: "Valor inválido", variant: "destructive" });
+      return;
+    }
+    setGrantingCredit(true);
+    try {
+      await api.post("/api/admin/wallet/grant-special-credit", {
+        tenant_id: creditTarget.tenant_id,
+        amount,
+        description: creditDescription || undefined,
+      });
+      toast({ title: "Crédito especial concedido!", description: `R$ ${amount.toFixed(2)} adicionado ao crédito especial de ${creditTarget.name}.` });
+      setCreditTarget(null);
+      setCreditAmount("");
+      setCreditDescription("");
+    } catch (err: any) {
+      toast({ title: "Erro ao conceder crédito", description: err.message || "Tente novamente", variant: "destructive" });
+    } finally {
+      setGrantingCredit(false);
+    }
+  };
 
   const filtered = sellers.filter((s) => {
     const matchSearch =
@@ -237,6 +270,10 @@ const Vendedores = () => {
                                 </>
                               )}
                             </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => setCreditTarget(seller)}>
+                              <Gift className="w-4 h-4 mr-2" />
+                              Adicionar Crédito Especial
+                            </DropdownMenuItem>
                             {/* Excluir removido — vendedores são apenas ativados/desativados */}
                           </DropdownMenuContent>
                         </DropdownMenu>
@@ -260,6 +297,61 @@ const Vendedores = () => {
         onSubmitUpdate={updateSeller}
         onSendPasswordReset={sendPasswordReset}
       />
+
+      {/* Special Credit Dialog */}
+      <Dialog open={!!creditTarget} onOpenChange={(o) => { if (!o) { setCreditTarget(null); setCreditAmount(""); setCreditDescription(""); } }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Gift className="w-5 h-5 text-primary" />
+              Adicionar Crédito Especial
+            </DialogTitle>
+            <DialogDescription>
+              {creditTarget?.name} — o crédito especial só é consumido quando o saldo da carteira do vendedor for insuficiente.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div>
+              <label className="text-sm font-medium text-foreground mb-1.5 block">Valor (R$) *</label>
+              <input
+                type="number"
+                step="0.01"
+                min="0.01"
+                value={creditAmount}
+                onChange={(e) => setCreditAmount(e.target.value)}
+                placeholder="0.00"
+                className="w-full h-10 px-3 rounded-lg border border-input bg-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+              />
+            </div>
+            <div>
+              <label className="text-sm font-medium text-foreground mb-1.5 block">Descrição (opcional)</label>
+              <input
+                type="text"
+                value={creditDescription}
+                onChange={(e) => setCreditDescription(e.target.value)}
+                placeholder="Bônus promocional, ajuste, etc."
+                className="w-full h-10 px-3 rounded-lg border border-input bg-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <button
+              onClick={() => { setCreditTarget(null); setCreditAmount(""); setCreditDescription(""); }}
+              disabled={grantingCredit}
+              className="h-10 px-4 rounded-lg border border-border text-foreground text-sm font-medium hover:bg-secondary disabled:opacity-50"
+            >
+              Cancelar
+            </button>
+            <button
+              onClick={handleGrantCredit}
+              disabled={grantingCredit || !creditAmount || parseFloat(creditAmount) <= 0}
+              className="h-10 px-5 rounded-lg gradient-primary text-primary-foreground text-sm font-medium flex items-center gap-2 hover:opacity-90 disabled:opacity-50"
+            >
+              {grantingCredit ? "Concedendo..." : "Conceder"}
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Delete confirmation */}
       {/* AlertDialog de exclusão removido — vendedores são apenas ativados/desativados */}

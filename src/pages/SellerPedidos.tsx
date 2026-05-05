@@ -21,6 +21,7 @@ import { createPortal } from "react-dom";
 import { StatusBadge } from "@/components/StatusBadge";
 import { useOrders } from "@/hooks/useOrders";
 import { api } from "@/lib/apiClient";
+import { getShippingModeLabel, getShippingModeColor } from "@/lib/shippingModeLabels";
 import {
   Select,
   SelectContent,
@@ -246,6 +247,7 @@ const SellerPedidos = () => {
                    <th className="text-left py-3 px-4 text-muted-foreground font-medium">Total</th>
                    <th className="text-left py-3 px-4 text-muted-foreground font-medium">Status</th>
                    <th className="text-left py-3 px-4 text-muted-foreground font-medium">Status ML</th>
+                   <th className="text-left py-3 px-4 text-muted-foreground font-medium">Tipo Envio</th>
                    <th className="text-left py-3 px-4 text-muted-foreground font-medium">Rastreio</th>
                    <th className="text-left py-3 px-4 text-muted-foreground font-medium">Data</th>
                    <th className="text-right py-3 px-4 text-muted-foreground font-medium">Ações</th>
@@ -286,6 +288,11 @@ const SellerPedidos = () => {
                             </span>
                           )}
                         </div>
+                      </td>
+                      <td className="py-3 px-4">
+                        <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border inline-block ${getShippingModeColor(order.shipping_mode)}`}>
+                          {getShippingModeLabel(order.shipping_mode)}
+                        </span>
                       </td>
                       <td className="py-3 px-4">
                         {order.tracking_code ? (

@@ -33,6 +33,7 @@ export interface SpendingForecast {
 export function useWallet() {
   const { profile } = useProfile();
   const [balance, setBalance] = useState(0);
+  const [specialCredit, setSpecialCredit] = useState(0);
   const [transactions, setTransactions] = useState<WalletTransaction[]>([]);
   const [forecast, setForecast] = useState<SpendingForecast | null>(null);
   const [loading, setLoading] = useState(true);
@@ -46,12 +47,15 @@ export function useWallet() {
 
     try {
       const [balanceRes, txRes, forecastRes] = await Promise.all([
-        api.post<{ balance?: number }>("/api/payments/pix", { action: "get_balance" }),
+        api.post<{ balance?: number; special_credit?: number }>("/api/payments/pix", { action: "get_balance" }),
         api.post<{ transactions?: WalletTransaction[] }>("/api/payments/pix", { action: "get_transactions", limit: 50 }),
         api.post<SpendingForecast & { error?: string }>("/api/payments/pix", { action: "get_spending_forecast" }),
       ]);
 
-      if (balanceRes) setBalance(balanceRes.balance ?? 0);
+      if (balanceRes) {
+        setBalance(balanceRes.balance ?? 0);
+        setSpecialCredit(balanceRes.special_credit ?? 0);
+      }
       if (txRes) setTransactions(txRes.transactions ?? []);
       if (forecastRes && !forecastRes.error) setForecast(forecastRes);
     } catch (err) {
@@ -96,5 +100,5 @@ export function useWallet() {
     );
   };
 
-  return { balance, transactions, forecast, loading, generating, generatePix, cancelCharge, reopenPix, checkChargeStatus, refetch: fetchData };
+  return { balance, specialCredit, transactions, forecast, loading, generating, generatePix, cancelCharge, reopenPix, checkChargeStatus, refetch: fetchData };
 }

@@ -150,11 +150,11 @@ export async function registerShipmentRoutes(app: FastifyInstance) {
     const tenantFilter = !isAdmin && tenantId ? 'AND o.tenant_id = $1' : '';
     const params = !isAdmin && tenantId ? [tenantId] : [];
 
-    const shipments = await queryMany<{ id: string; ml_shipment_id: string; tenant_id: string }>(
-      `SELECT s.id, s.ml_shipment_id, o.tenant_id
+    const shipments = await queryMany<{ id: string; order_id: string; ml_shipment_id: string; tenant_id: string }>(
+      `SELECT s.id, s.order_id, s.ml_shipment_id, o.tenant_id
        FROM shipments s
        JOIN orders o ON o.id = s.order_id
-       WHERE s.logistic_type IS NULL AND s.ml_shipment_id IS NOT NULL ${tenantFilter}
+       WHERE (s.logistic_type IS NULL OR s.shipping_mode IS NULL) AND s.ml_shipment_id IS NOT NULL ${tenantFilter}
        LIMIT 100`,
       params
     );
@@ -179,8 +179,21 @@ export async function registerShipmentRoutes(app: FastifyInstance) {
 
         const shipData: any = await shipRes.json();
         const logisticType = shipData.logistic_type || shipData.logistic?.type || null;
-        if (logisticType) {
-          await query(`UPDATE shipments SET logistic_type = $1 WHERE id = $2`, [logisticType, ship.id]);
+        const shippingMode = shipData.mode || shipData.logistic?.mode || null;
+        if (logisticType || shippingMode) {
+          await query(
+            `UPDATE shipments
+               SET logistic_type = COALESCE($1, logistic_type),
+                   shipping_mode = COALESCE($2, shipping_mode)
+               WHERE id = $3`,
+            [logisticType, shippingMode, ship.id]
+          );
+          if (shippingMode) {
+            await query(
+              `UPDATE orders SET shipping_mode = COALESCE(shipping_mode, $1) WHERE id = $2`,
+              [shippingMode, ship.order_id]
+            );
+          }
           updated++;
         }
       } catch { /* skip */ }

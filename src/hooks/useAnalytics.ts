@@ -30,6 +30,7 @@ export interface SalesBySkuRow {
   quantity_sold: number;
   revenue: number;
   cost: number;
+  logistics_cost?: number;
   shipping: number;
   fees: number;
   net: number;
@@ -42,6 +43,7 @@ export interface SalesByCategoryRow {
   quantity_sold: number;
   revenue: number;
   cost: number;
+  logistics_cost?: number;
   net: number;
   product_count: number;
 }
@@ -78,6 +80,8 @@ export interface AnalyticsData {
   totals: {
     revenue: number;
     cost: number;
+    logisticsCost?: number;
+    realProductCost?: number;
     shipping: number;
     fees: number;
     net: number;

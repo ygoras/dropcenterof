@@ -497,13 +497,14 @@ export async function registerAsaasPixRoutes(app: FastifyInstance) {
     // ─── ACTION: get_balance ─────────────────────────────────────
 
     if (action === 'get_balance') {
-      const wallet = await queryOne<{ balance: number; updated_at: string }>(
-        'SELECT balance, updated_at FROM wallet_balances WHERE tenant_id = $1',
+      const wallet = await queryOne<{ balance: number; special_credit: number; updated_at: string }>(
+        'SELECT balance, special_credit, updated_at FROM wallet_balances WHERE tenant_id = $1',
         [user.tenantId]
       );
 
       return reply.send({
         balance: wallet?.balance ?? 0,
+        special_credit: wallet?.special_credit ?? 0,
         updated_at: wallet?.updated_at ?? null,
       });
     }

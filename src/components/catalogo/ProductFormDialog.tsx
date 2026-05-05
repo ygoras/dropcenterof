@@ -66,6 +66,7 @@ export function ProductFormDialog({ open, onOpenChange, categories, product, onS
   const [categoryId, setCategoryId] = useState("");
   const [costPrice, setCostPrice] = useState("");
   const [sellPrice, setSellPrice] = useState("");
+  const [logisticsCost, setLogisticsCost] = useState("0");
   const [weightKg, setWeightKg] = useState("");
   const [dimLength, setDimLength] = useState("");
   const [dimWidth, setDimWidth] = useState("");
@@ -99,6 +100,7 @@ export function ProductFormDialog({ open, onOpenChange, categories, product, onS
       setCategoryId(product.category_id || "");
       setCostPrice(String(product.cost_price));
       setSellPrice(String(product.sell_price));
+      setLogisticsCost(String((product as any).logistics_cost ?? 0));
       setWeightKg(product.weight_kg ? String(product.weight_kg) : "");
       const dims = product.dimensions as { length?: number; width?: number; height?: number } | null;
       setDimLength(dims?.length ? String(dims.length) : "");
@@ -140,6 +142,7 @@ export function ProductFormDialog({ open, onOpenChange, categories, product, onS
       setCategoryId("");
       setCostPrice("");
       setSellPrice("");
+      setLogisticsCost("0");
       setWeightKg("");
       setDimLength("");
       setDimWidth("");
@@ -241,6 +244,7 @@ export function ProductFormDialog({ open, onOpenChange, categories, product, onS
       category_id: undefined,
       cost_price: parseFloat(costPrice) || 0,
       sell_price: parseFloat(sellPrice) || 0,
+      logistics_cost: parseFloat(logisticsCost) || 0,
       weight_kg: parseFloat(weightKg) || undefined,
       dimensions: hasDims ? { length: l, width: w, height: h } : undefined,
       images,
@@ -489,10 +493,16 @@ export function ProductFormDialog({ open, onOpenChange, categories, product, onS
           </div>
 
           {/* Prices */}
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-4 gap-3">
             <div>
               <label className="text-sm font-medium text-foreground mb-1.5 block">Custo (R$)</label>
               <input type="number" step="0.01" value={costPrice} onChange={(e) => setCostPrice(e.target.value)} placeholder="0.00" className={inputClass} />
+              <p className="text-[10px] text-muted-foreground mt-0.5">Inclui logística</p>
+            </div>
+            <div>
+              <label className="text-sm font-medium text-foreground mb-1.5 block">Logística (R$)</label>
+              <input type="number" step="0.01" value={logisticsCost} onChange={(e) => setLogisticsCost(e.target.value)} placeholder="0.00" className={inputClass} />
+              <p className="text-[10px] text-muted-foreground mt-0.5">Embutida no custo</p>
             </div>
             <div>
               <label className="text-sm font-medium text-foreground mb-1.5 block">Venda (R$) *</label>

@@ -32,7 +32,7 @@ import {
 import { formatCurrency, formatDateTime as formatDate } from "@/lib/formatters";
 
 const SellerCredito = () => {
-  const { balance, transactions, forecast, loading, generating, generatePix, cancelCharge, reopenPix, checkChargeStatus, refetch } = useWallet();
+  const { balance, specialCredit, transactions, forecast, loading, generating, generatePix, cancelCharge, reopenPix, checkChargeStatus, refetch } = useWallet();
   const [rechargeOpen, setRechargeOpen] = useState(false);
   const [rechargeAmount, setRechargeAmount] = useState("");
   const [pixResult, setPixResult] = useState<{ pix_code: string; pix_qr_image: string; amount: number; reference_id?: string } | null>(null);
@@ -150,6 +150,12 @@ const SellerCredito = () => {
             <span className="text-xs font-medium opacity-80">Saldo disponível</span>
           </div>
           <p className="text-4xl font-display font-bold tracking-tight">{formatCurrency(balance)}</p>
+          {specialCredit > 0 && (
+            <div className="mt-2 inline-flex items-center gap-1.5 bg-white/15 px-2.5 py-1 rounded-full text-xs font-medium" title="Crédito especial concedido pelo admin. Sua carteira é debitada primeiro; este crédito só é usado quando o saldo da carteira ficar insuficiente.">
+              <Banknote className="w-3.5 h-3.5" />
+              Crédito Especial: {formatCurrency(specialCredit)}
+            </div>
+          )}
           <div className="flex items-center gap-4 mt-4">
             <Button
               variant="secondary"
@@ -166,6 +172,18 @@ const SellerCredito = () => {
           </div>
         </div>
       </div>
+
+      {specialCredit > 0 && (
+        <div className="bg-info/10 border border-info/30 rounded-xl p-4 flex items-start gap-3">
+          <Banknote className="w-5 h-5 text-info shrink-0 mt-0.5" />
+          <div className="text-sm">
+            <p className="font-medium text-foreground">Você tem crédito especial de {formatCurrency(specialCredit)}</p>
+            <p className="text-muted-foreground text-xs mt-0.5">
+              Concedido pelo admin. Suas vendas debitam primeiro do saldo da carteira; o crédito especial é usado apenas se o saldo da carteira ficar insuficiente.
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Pending Credit Orders Alert */}
       {forecast && forecast.pending_credit_orders > 0 && (

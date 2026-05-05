@@ -16,6 +16,7 @@ const createProductSchema = z.object({
   cost_price: z.number().min(0.01, 'Custo é obrigatório'),
   sale_price: z.number().min(0.01).optional(),
   sell_price: z.number().min(0.01).optional(),
+  logistics_cost: z.number().min(0).optional(),
   category_id: z.string().nullable().optional(),
   images: z.array(z.string()).min(2, 'Mínimo 2 imagens obrigatórias'),
   weight: z.number().min(0.01, 'Peso é obrigatório').optional(),
@@ -55,6 +56,7 @@ const updateProductSchema = z.object({
   cost_price: z.number().min(0).optional(),
   sale_price: z.number().min(0).optional(),
   sell_price: z.number().min(0).optional(),
+  logistics_cost: z.number().min(0).optional(),
   category_id: z.string().nullable().optional(),
   images: z.array(z.string()).optional(),
   weight: z.number().min(0).optional(),
@@ -170,13 +172,13 @@ export async function registerProductRoutes(app: FastifyInstance) {
     if (body.warranty_time) attributes._warranty_time = body.warranty_time;
 
     const product = await queryOne(
-      `INSERT INTO products (name, sku, description, cost_price, sell_price, category, images, weight_kg, dimensions, status, tenant_id, brand, ml_category_id, attributes)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+      `INSERT INTO products (name, sku, description, cost_price, sell_price, category, images, weight_kg, dimensions, status, tenant_id, brand, ml_category_id, attributes, logistics_cost)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
        RETURNING *`,
       [body.name, body.sku ?? `SKU-${Date.now()}`, body.description ?? null, body.cost_price ?? 0, sellPrice,
        body.category_id ?? null, JSON.stringify(body.images ?? []), weightKg,
        dims ? JSON.stringify(dims) : null, body.status ?? 'active', tenantId,
-       body.brand ?? null, mlCategoryId, JSON.stringify(attributes)]
+       body.brand ?? null, mlCategoryId, JSON.stringify(attributes), body.logistics_cost ?? 0]
     );
 
     if (!product) return reply.status(500).send({ error: 'Falha ao criar produto' });

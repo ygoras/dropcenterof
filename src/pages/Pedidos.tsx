@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { formatCurrency, formatDateTime as formatDate } from "@/lib/formatters";
 import { getMlStatusLabel, getClaimBadge } from "@/lib/mlStatusLabels";
+import { getShippingModeLabel, getShippingModeColor } from "@/lib/shippingModeLabels";
 import {
   ShoppingCart,
   Search,
@@ -176,6 +177,7 @@ const Pedidos = () => {
                    <th className="text-left py-3 px-4 text-muted-foreground font-medium">Total</th>
                    <th className="text-left py-3 px-4 text-muted-foreground font-medium">Status</th>
                    <th className="text-left py-3 px-4 text-muted-foreground font-medium">Status ML</th>
+                   <th className="text-left py-3 px-4 text-muted-foreground font-medium">Tipo Envio</th>
                    <th className="text-left py-3 px-4 text-muted-foreground font-medium">Data</th>
                    <th className="text-right py-3 px-4 text-muted-foreground font-medium">Ações</th>
                  </tr>
@@ -228,6 +230,11 @@ const Pedidos = () => {
                             </span>
                           )}
                         </div>
+                      </td>
+                      <td className="py-3 px-4">
+                        <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border inline-block ${getShippingModeColor(order.shipping_mode)}`}>
+                          {getShippingModeLabel(order.shipping_mode)}
+                        </span>
                       </td>
                       <td className="py-3 px-4 text-muted-foreground text-xs">
                         {formatDate(order.created_at)}

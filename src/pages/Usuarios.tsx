@@ -154,7 +154,7 @@ const Usuarios = () => {
                     </td>
                     <td className="py-3 px-4">
                       <div className="flex gap-1.5">
-                        {user.roles.map((role) => (
+                        {(Array.isArray(user.roles) ? user.roles : []).map((role) => (
                           <span
                             key={role}
                             className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-primary/10 text-primary"

@@ -203,9 +203,9 @@ const Planos = () => {
 
   const filtered = payments.filter((p) => {
     const matchSearch =
-      p.seller_name.toLowerCase().includes(search.toLowerCase()) ||
-      p.tenant_name.toLowerCase().includes(search.toLowerCase()) ||
-      p.seller_email.toLowerCase().includes(search.toLowerCase());
+      (p.seller_name ?? "").toLowerCase().includes(search.toLowerCase()) ||
+      (p.tenant_name ?? "").toLowerCase().includes(search.toLowerCase()) ||
+      (p.seller_email ?? "").toLowerCase().includes(search.toLowerCase());
     const matchStatus = statusFilter === "all" || p.status === statusFilter;
     return matchSearch && matchStatus;
   });

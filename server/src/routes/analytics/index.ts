@@ -106,20 +106,41 @@ export async function registerAnalyticsRoutes(app: FastifyInstance) {
       params
     );
 
-    // Totals
+    // Admin sees cost_price (real cost, includes logistics), seller sees sell_price (their cost to admin)
+    const costCol = isAdmin ? 'p.cost_price' : 'p.sell_price';
+
+    // Totals — compute real cost (per item × quantity), logistics (admin only), and avg ticket
     const totalsRow = await queryOne(
-      `SELECT COALESCE(SUM(total), 0) as revenue,
-              0 as cost, 0 as shipping, 0 as fees,
-              COALESCE(SUM(total), 0) as net,
-              COUNT(*) as orders, 0 as items_sold,
-              CASE WHEN COUNT(*) > 0 THEN COALESCE(SUM(total), 0) / COUNT(*) ELSE 0 END as avg_ticket
-       FROM orders o
-       WHERE ${where}`,
+      `WITH order_items AS (
+         SELECT o.id as oid, o.total, o.shipping_cost, item, p.cost_price, p.sell_price, p.logistics_cost
+         FROM orders o
+         CROSS JOIN LATERAL jsonb_array_elements(o.items) item
+         LEFT JOIN products p ON p.id = (item->>'product_id')::uuid
+         WHERE ${where}
+       ),
+       order_totals AS (
+         SELECT DISTINCT oid, total, shipping_cost FROM order_items
+       )
+       SELECT
+         (SELECT COALESCE(SUM(total), 0) FROM order_totals) as revenue,
+         (SELECT COALESCE(SUM((item->>'quantity')::int * COALESCE(${costCol}, 0)), 0) FROM order_items) as cost,
+         (SELECT COALESCE(SUM((item->>'quantity')::int * COALESCE(logistics_cost, 0)), 0) FROM order_items) as logistics_cost,
+         (SELECT COALESCE(SUM(shipping_cost), 0) FROM order_totals) as shipping,
+         0 as fees,
+         (SELECT COUNT(*) FROM order_totals) as orders,
+         (SELECT COALESCE(SUM((item->>'quantity')::int), 0) FROM order_items) as items_sold,
+         CASE WHEN (SELECT COUNT(*) FROM order_totals) > 0
+              THEN (SELECT SUM(total) FROM order_totals) / (SELECT COUNT(*) FROM order_totals)
+              ELSE 0 END as avg_ticket`,
       params
     );
 
-    // Admin sees cost_price (real cost), seller sees sell_price (their cost to admin)
-    const costCol = isAdmin ? 'p.cost_price' : 'p.sell_price';
+    const totalRevenue = Number(totalsRow?.revenue || 0);
+    const totalCost = Number(totalsRow?.cost || 0);
+    const totalLogistics = isAdmin ? Number(totalsRow?.logistics_cost || 0) : 0;
+    // For admin: net = revenue - cost (cost already includes logistics)
+    // For seller: net = revenue - cost (their cost = sell_price)
+    const totalNet = totalRevenue - totalCost;
 
     // Sales by SKU — unnest JSONB items array
     const skuParams = [...params];
@@ -129,6 +150,9 @@ export async function registerAnalyticsRoutes(app: FastifyInstance) {
       skuCategoryCondition = `AND COALESCE(p.category, p.ml_category_id) = $${skuParams.length}`;
     }
 
+    // Admin gets logistics_cost column; seller gets 0
+    const logisticsCol = isAdmin ? 'p.logistics_cost' : '0::numeric';
+
     const salesBySku = await queryMany(
       `SELECT
          COALESCE(item->>'sku', 'SEM-SKU') as sku,
@@ -136,6 +160,7 @@ export async function registerAnalyticsRoutes(app: FastifyInstance) {
          SUM((item->>'quantity')::int) as quantity_sold,
          SUM((item->>'quantity')::int * COALESCE((item->>'unit_price')::numeric, 0)) as revenue,
          COALESCE(SUM((item->>'quantity')::int * COALESCE(${costCol}, 0)), 0) as cost,
+         COALESCE(SUM((item->>'quantity')::int * COALESCE(${logisticsCol}, 0)), 0) as logistics_cost,
          COALESCE(SUM(o.shipping_cost), 0) as shipping,
          0 as fees,
          SUM((item->>'quantity')::int * COALESCE((item->>'unit_price')::numeric, 0))
@@ -159,6 +184,7 @@ export async function registerAnalyticsRoutes(app: FastifyInstance) {
          SUM((item->>'quantity')::int) as quantity_sold,
          SUM((item->>'quantity')::int * COALESCE((item->>'unit_price')::numeric, 0)) as revenue,
          COALESCE(SUM((item->>'quantity')::int * COALESCE(${costCol}, 0)), 0) as cost,
+         COALESCE(SUM((item->>'quantity')::int * COALESCE(${logisticsCol}, 0)), 0) as logistics_cost,
          SUM((item->>'quantity')::int * COALESCE((item->>'unit_price')::numeric, 0))
            - COALESCE(SUM((item->>'quantity')::int * COALESCE(${costCol}, 0)), 0) as net,
          COUNT(DISTINCT p.id) as product_count
@@ -179,11 +205,13 @@ export async function registerAnalyticsRoutes(app: FastifyInstance) {
       operatorProductivity: [],
       dailyTrend,
       totals: {
-        revenue: Number(totalsRow?.revenue || 0),
-        cost: Number(totalsRow?.cost || 0),
+        revenue: totalRevenue,
+        cost: totalCost,
+        logisticsCost: totalLogistics,
+        realProductCost: isAdmin ? totalCost - totalLogistics : totalCost,
         shipping: Number(totalsRow?.shipping || 0),
         fees: Number(totalsRow?.fees || 0),
-        net: Number(totalsRow?.net || 0),
+        net: totalNet,
         orders: Number(totalsRow?.orders || 0),
         itemsSold: Number(totalsRow?.items_sold || 0),
         avgTicket: Number(totalsRow?.avg_ticket || 0),
