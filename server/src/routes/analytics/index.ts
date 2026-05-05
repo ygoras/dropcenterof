@@ -114,6 +114,8 @@ export async function registerAnalyticsRoutes(app: FastifyInstance) {
 
     // Admin sees cost_price (real cost, includes logistics), seller sees sell_price (their cost to admin)
     const costCol = isAdmin ? 'p.cost_price' : 'p.sell_price';
+    // For CTE-internal references (no `p.` prefix because columns are projected through the CTE)
+    const costColCTE = isAdmin ? 'cost_price' : 'sell_price';
 
     // Totals — compute real cost (per item × quantity), logistics (admin only), and avg ticket
     // Use LEFT JOIN LATERAL so orders without items still count for revenue/orders
@@ -132,7 +134,7 @@ export async function registerAnalyticsRoutes(app: FastifyInstance) {
        )
        SELECT
          (SELECT COALESCE(SUM(total), 0) FROM base_orders) as revenue,
-         (SELECT COALESCE(SUM((item->>'quantity')::int * COALESCE(${costCol}, 0)), 0)
+         (SELECT COALESCE(SUM((item->>'quantity')::int * COALESCE(${costColCTE}, 0)), 0)
             FROM order_items WHERE item IS NOT NULL) as cost,
          (SELECT COALESCE(SUM((item->>'quantity')::int * COALESCE(logistics_cost, 0)), 0)
             FROM order_items WHERE item IS NOT NULL) as logistics_cost,
