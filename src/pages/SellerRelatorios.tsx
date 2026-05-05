@@ -22,10 +22,10 @@ const SellerRelatorios = () => {
 
       {data && (
         <div className="grid grid-cols-2 lg:grid-cols-6 gap-4">
-          <StatCard title="Faturamento" value={formatCurrency(data.totals.revenue)} icon={<DollarSign className="w-5 h-5" />} />
-          <StatCard title="Custo" value={formatCurrency(data.totals.cost)} icon={<Package className="w-5 h-5" />} changeType="negative" change="Produtos" />
-          <StatCard title="Frete" value={formatCurrency(data.totals.shipping)} icon={<ShoppingCart className="w-5 h-5" />} changeType="negative" change="Envios" />
-          <StatCard title="Taxas ML" value={formatCurrency(data.totals.fees)} icon={<Wallet className="w-5 h-5" />} changeType="negative" change="Comissões" />
+          <StatCard title="Faturamento" value={formatCurrency(data.totals.revenue)} icon={<DollarSign className="w-5 h-5" />} change="GMV vendido" />
+          <StatCard title="Custo Produtos" value={formatCurrency(data.totals.cost)} icon={<Package className="w-5 h-5" />} changeType="negative" change="Pago ao admin" />
+          <StatCard title="Frete" value={formatCurrency(data.totals.sellerShipping ?? data.totals.shipping ?? 0)} icon={<ShoppingCart className="w-5 h-5" />} changeType="negative" change="Você pagou" />
+          <StatCard title="Taxas ML" value={formatCurrency(data.totals.mlFees ?? data.totals.fees ?? 0)} icon={<Wallet className="w-5 h-5" />} changeType="negative" change="Comissões ML" />
           <StatCard title="Você Recebe" value={formatCurrency(data.totals.net)} icon={<TrendingUp className="w-5 h-5" />} changeType={data.totals.net >= 0 ? "positive" : "negative"} change={`Margem ${data.totals.revenue > 0 ? ((data.totals.net / data.totals.revenue) * 100).toFixed(1) : 0}%`} />
           <StatCard title="Pedidos" value={data.totals.orders} icon={<ShoppingCart className="w-5 h-5" />} />
         </div>

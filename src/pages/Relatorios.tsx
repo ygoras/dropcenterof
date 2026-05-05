@@ -1,4 +1,4 @@
-import { BarChart3, DollarSign, ShoppingCart, Package, TrendingUp, Wallet, Truck } from "lucide-react";
+import { BarChart3, DollarSign, ShoppingCart, Package, TrendingUp, Wallet, Truck, Store } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useAnalytics } from "@/hooks/useAnalytics";
 import { ReportFilters } from "@/components/relatorios/ReportFilters";
@@ -23,16 +23,64 @@ const Relatorios = () => {
       </div>
 
       {data && (
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-4">
-          <StatCard title="Faturamento" value={formatCurrency(data.totals.revenue)} icon={<DollarSign className="w-5 h-5" />} />
-          <StatCard title="Custo" value={formatCurrency(data.totals.cost)} icon={<Package className="w-5 h-5" />} changeType="negative" change="Inclui logística" />
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
+          {/* Receita do admin = atacado vendido aos vendedores (sell_price × qty) */}
+          <StatCard
+            title="Receita Admin"
+            value={formatCurrency(data.totals.revenue)}
+            icon={<DollarSign className="w-5 h-5" />}
+            change="Atacado (sell_price)"
+          />
+          {/* Custo real = cost_price × qty (inclui logística embutida) */}
+          <StatCard
+            title="Custo Real"
+            value={formatCurrency(data.totals.cost)}
+            icon={<Package className="w-5 h-5" />}
+            changeType="negative"
+            change="Inclui logística"
+          />
+          {/* Lucro atacado = receita − custo real */}
+          <StatCard
+            title="Lucro Atacado"
+            value={formatCurrency(data.totals.net)}
+            icon={<TrendingUp className="w-5 h-5" />}
+            changeType={data.totals.net >= 0 ? "positive" : "negative"}
+            change={`Margem ${data.totals.revenue > 0 ? ((data.totals.net / data.totals.revenue) * 100).toFixed(1) : 0}%`}
+          />
+          {/* Logística — só mostra se houver dado */}
           {data.totals.logisticsCost !== undefined && data.totals.logisticsCost > 0 && (
-            <StatCard title="Logística" value={formatCurrency(data.totals.logisticsCost)} icon={<Truck className="w-5 h-5" />} changeType="negative" change="Embutida no custo" />
+            <StatCard
+              title="Logística"
+              value={formatCurrency(data.totals.logisticsCost)}
+              icon={<Truck className="w-5 h-5" />}
+              changeType="negative"
+              change="Embutida no custo"
+            />
           )}
-          <StatCard title="Taxas ML" value={formatCurrency(data.totals.fees)} icon={<Wallet className="w-5 h-5" />} changeType="negative" change="Comissões" />
-          <StatCard title="Lucro Real" value={formatCurrency(data.totals.net)} icon={<TrendingUp className="w-5 h-5" />} changeType={data.totals.net >= 0 ? "positive" : "negative"} change={`Margem ${data.totals.revenue > 0 ? ((data.totals.net / data.totals.revenue) * 100).toFixed(1) : 0}%`} />
-          <StatCard title="Pedidos" value={data.totals.orders} icon={<ShoppingCart className="w-5 h-5" />} />
-          <StatCard title="Ticket Médio" value={formatCurrency(data.totals.avgTicket)} icon={<DollarSign className="w-5 h-5" />} />
+          {/* Informacionais (não somam pro lucro do admin) */}
+          <StatCard
+            title="GMV Vendedores"
+            value={formatCurrency(data.totals.gmv ?? 0)}
+            icon={<Store className="w-5 h-5" />}
+            change="O que vendedores faturaram"
+          />
+          <StatCard
+            title="Taxas ML pagas"
+            value={formatCurrency(data.totals.mlFees ?? data.totals.fees ?? 0)}
+            icon={<Wallet className="w-5 h-5" />}
+            change="Cobradas dos vendedores"
+          />
+          <StatCard
+            title="Pedidos"
+            value={data.totals.orders}
+            icon={<ShoppingCart className="w-5 h-5" />}
+          />
+          <StatCard
+            title="Ticket Médio"
+            value={formatCurrency(data.totals.avgTicket)}
+            icon={<DollarSign className="w-5 h-5" />}
+            change="Por pedido GMV"
+          />
         </div>
       )}
 

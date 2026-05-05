@@ -15,20 +15,26 @@ export interface SalesBySellerRow {
   tenant_id: string;
   tenant_name: string;
   order_count: number;
-  total_revenue: number;
-  total_cost: number;
-  total_shipping: number;
-  total_fees: number;
+  items_sold: number;
+  total_revenue: number;          // admin: SUM(qty × sell_price); seller-view: GMV
+  gmv?: number;                   // sellers' GMV (informational for admin)
+  total_cost: number;             // admin: cost_price × qty
+  total_logistics?: number;       // admin only
+  total_ml_fees?: number;         // ML commission paid by seller
+  total_seller_shipping?: number; // shipping borne by seller
+  total_buyer_shipping?: number;  // shipping paid by buyer
+  total_shipping: number;         // legacy alias
+  total_fees: number;             // legacy alias
   total_net: number;
   avg_ticket: number;
-  items_sold: number;
 }
 
 export interface SalesBySkuRow {
   sku: string;
   product_name: string;
   quantity_sold: number;
-  revenue: number;
+  revenue: number;        // admin: sell_price × qty; seller: unit_price × qty
+  gmv?: number;           // unit_price × qty (informational)
   cost: number;
   logistics_cost?: number;
   shipping: number;
@@ -42,6 +48,7 @@ export interface SalesByCategoryRow {
   category_name: string;
   quantity_sold: number;
   revenue: number;
+  gmv?: number;
   cost: number;
   logistics_cost?: number;
   net: number;
@@ -78,12 +85,16 @@ export interface AnalyticsData {
   operatorProductivity: OperatorProductivityRow[];
   dailyTrend: DailyTrendRow[];
   totals: {
-    revenue: number;
-    cost: number;
+    revenue: number;          // admin: wholesale (sell_price × qty); seller: GMV
+    gmv?: number;             // sellers' GMV (informational for admin)
+    cost: number;             // admin: cost_price × qty; seller: sell_price × qty
     logisticsCost?: number;
     realProductCost?: number;
-    shipping: number;
-    fees: number;
+    mlFees?: number;          // ML commission paid by sellers (informational for admin)
+    sellerShipping?: number;  // shipping borne by seller (informational for admin)
+    buyerShipping?: number;   // shipping paid by buyer (informational)
+    shipping: number;         // legacy alias = sellerShipping
+    fees: number;             // legacy alias = mlFees
     net: number;
     orders: number;
     itemsSold: number;

@@ -397,8 +397,18 @@ async function handleOrderNotification(credential: MlCredential, resource: strin
     (sum, item) => sum + item.quantity * item.unit_price, 0
   );
 
+  // ML sale_fee per item × quantity = total ML commission charged to the seller
+  // The order resource already returns sale_fee per unit on each order_item — no extra API call.
+  const mlFee = (orderData.order_items || []).reduce(
+    (sum: number, oi: any) => sum + Number(oi.sale_fee ?? 0) * Number(oi.quantity ?? 0),
+    0
+  );
+
   // Fetch shipping info
   let shippingCost = 0;
+  // Seller's shipping cost — what the seller is responsible for (free-shipping subsidy in ME2).
+  // Reads list_cost first (full price seller would pay if subsidizing), then falls back to cost.
+  let sellerShippingCost = 0;
   let shippingAddress: Record<string, string> | null = null;
   let trackingCode: string | null = null;
   let logisticTypeFromOrder: string | null = null;
@@ -417,6 +427,12 @@ async function handleOrderNotification(credential: MlCredential, resource: strin
         const shipData: any = await shipRes.json();
 
         shippingCost = shipData.shipping_option?.cost || shipData.cost || 0;
+        sellerShippingCost = Number(
+          shipData?.shipping_option?.list_cost
+          ?? shipData?.shipping_option?.cost
+          ?? shipData?.lead_time?.cost
+          ?? 0
+        );
         trackingCode = shipData.tracking_number || null;
         logisticTypeFromOrder = shipData.logistic_type || shipData.logistic?.type || null;
         shippingModeFromOrder = shipData.mode || shipData.logistic?.mode || null;
@@ -455,6 +471,8 @@ async function handleOrderNotification(credential: MlCredential, resource: strin
     items: orderItems,
     subtotal,
     shipping_cost: shippingCost,
+    seller_shipping_cost: sellerShippingCost,
+    ml_fee: mlFee,
     total,
     shipping_address: shippingAddress,
     tracking_code: trackingCode,
@@ -500,8 +518,10 @@ async function handleOrderNotification(credential: MlCredential, resource: strin
     `INSERT INTO orders (
       tenant_id, order_number, customer_name, customer_document, customer_email, customer_phone,
       status, items, subtotal, shipping_cost, total, shipping_address, tracking_code,
-      ml_order_id, ml_credential_id, notes, ml_status, shipping_mode, created_at, updated_at
-    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,NOW())
+      ml_order_id, ml_credential_id, notes, ml_status, shipping_mode,
+      ml_fee, seller_shipping_cost,
+      created_at, updated_at
+    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,NOW())
     ON CONFLICT (ml_order_id, tenant_id) DO UPDATE SET
       customer_name = EXCLUDED.customer_name,
       customer_document = EXCLUDED.customer_document,
@@ -537,6 +557,9 @@ async function handleOrderNotification(credential: MlCredential, resource: strin
       notes = EXCLUDED.notes,
       ml_status = COALESCE(EXCLUDED.ml_status, orders.ml_status),
       shipping_mode = COALESCE(EXCLUDED.shipping_mode, orders.shipping_mode),
+      -- Idempotente: só preenche ml_fee/seller_shipping_cost se ainda for NULL (não sobrescreve ajustes manuais)
+      ml_fee = COALESCE(orders.ml_fee, EXCLUDED.ml_fee),
+      seller_shipping_cost = COALESCE(orders.seller_shipping_cost, EXCLUDED.seller_shipping_cost),
       updated_at = NOW()
     RETURNING id, (xmax = 0) AS is_new, status AS final_status`,
     [
@@ -550,6 +573,8 @@ async function handleOrderNotification(credential: MlCredential, resource: strin
       orderPayload.ml_credential_id, orderPayload.notes,
       orderPayload.ml_status,
       shippingModeFromOrder,
+      orderPayload.ml_fee,
+      orderPayload.seller_shipping_cost,
       orderData.date_created || new Date().toISOString(),
     ]
   );

@@ -95,7 +95,8 @@ export function SalesBySellerTab({ data, dailyTrend }: Props) {
         </div>
       </div>
 
-      {/* Financial Table */}
+      {/* Financial Table — admin perspective: receita atacado, custo admin, lucro admin (cols 4-7).
+          Colunas informativas (8-10): GMV vendedor, taxas ML pagas, frete vendedor. */}
       <div className="bg-card rounded-xl border border-border shadow-card overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
@@ -104,17 +105,21 @@ export function SalesBySellerTab({ data, dailyTrend }: Props) {
                 <th className="text-left py-3 px-4 text-muted-foreground font-medium">Vendedor</th>
                 <th className="text-right py-3 px-4 text-muted-foreground font-medium">Pedidos</th>
                 <th className="text-right py-3 px-4 text-muted-foreground font-medium">Itens</th>
-                <th className="text-right py-3 px-4 text-muted-foreground font-medium">Faturamento</th>
-                <th className="text-right py-3 px-4 text-muted-foreground font-medium">Custo</th>
-                <th className="text-right py-3 px-4 text-muted-foreground font-medium">Frete</th>
-                <th className="text-right py-3 px-4 text-muted-foreground font-medium">Taxas ML</th>
-                <th className="text-right py-3 px-4 text-muted-foreground font-medium text-success">Líquido</th>
+                <th className="text-right py-3 px-4 text-muted-foreground font-medium">Receita Admin</th>
+                <th className="text-right py-3 px-4 text-muted-foreground font-medium">Custo Admin</th>
+                <th className="text-right py-3 px-4 text-muted-foreground font-medium text-success">Lucro Admin</th>
                 <th className="text-right py-3 px-4 text-muted-foreground font-medium">Margem</th>
+                <th className="text-right py-3 px-4 text-muted-foreground font-medium border-l border-border">GMV Vendedor</th>
+                <th className="text-right py-3 px-4 text-muted-foreground font-medium">Taxas ML pagas</th>
+                <th className="text-right py-3 px-4 text-muted-foreground font-medium">Frete Vendedor</th>
               </tr>
             </thead>
             <tbody>
               {data.map((row) => {
                 const margin = row.total_revenue > 0 ? (row.total_net / row.total_revenue) * 100 : 0;
+                const gmv = row.gmv ?? 0;
+                const mlFees = row.total_ml_fees ?? row.total_fees ?? 0;
+                const sellerShipping = row.total_seller_shipping ?? row.total_shipping ?? 0;
                 return (
                   <tr key={row.tenant_id} className="border-b border-border/50 hover:bg-secondary/20 transition-colors">
                     <td className="py-3 px-4 font-medium text-foreground">{row.tenant_name}</td>
@@ -122,14 +127,15 @@ export function SalesBySellerTab({ data, dailyTrend }: Props) {
                     <td className="py-3 px-4 text-right text-foreground">{row.items_sold}</td>
                     <td className="py-3 px-4 text-right font-semibold text-foreground">{formatCurrency(row.total_revenue)}</td>
                     <td className="py-3 px-4 text-right text-destructive">{formatCurrency(row.total_cost)}</td>
-                    <td className="py-3 px-4 text-right text-muted-foreground">{formatCurrency(row.total_shipping)}</td>
-                    <td className="py-3 px-4 text-right text-muted-foreground">{formatCurrency(row.total_fees)}</td>
                     <td className="py-3 px-4 text-right font-semibold text-success">{formatCurrency(row.total_net)}</td>
                     <td className="py-3 px-4 text-right">
                       <span className={margin >= 0 ? "text-success" : "text-destructive"}>
                         {margin.toFixed(1)}%
                       </span>
                     </td>
+                    <td className="py-3 px-4 text-right text-muted-foreground border-l border-border/50">{formatCurrency(gmv)}</td>
+                    <td className="py-3 px-4 text-right text-muted-foreground">{formatCurrency(mlFees)}</td>
+                    <td className="py-3 px-4 text-right text-muted-foreground">{formatCurrency(sellerShipping)}</td>
                   </tr>
                 );
               })}

@@ -82,19 +82,45 @@ export async function registerAnalyticsRoutes(app: FastifyInstance) {
 
     const where = conditions.join(' AND ');
 
-    // Sales by seller
+    // Sales by seller — admin perspective:
+    //   total_revenue = SUM(qty × sell_price)   — admin's wholesale revenue
+    //   gmv          = SUM(o.total)             — seller's GMV (informational)
+    //   total_cost   = SUM(qty × cost_price)    — admin's real cost
+    //   total_logistics = SUM(qty × logistics_cost) — admin's logistics
+    //   total_ml_fees / total_seller_shipping = informational (seller paid these to ML/carrier)
+    //   total_buyer_shipping = informational (what buyer paid)
+    //   net = total_revenue − total_cost (admin's wholesale margin)
     const salesBySeller = await queryMany(
-      `SELECT o.tenant_id, t.name as tenant_name,
-              COUNT(DISTINCT o.id) as order_count,
-              COALESCE(SUM(o.total), 0) as total_revenue,
-              0 as total_cost, 0 as total_shipping, 0 as total_fees,
-              COALESCE(SUM(o.total), 0) as total_net,
-              CASE WHEN COUNT(DISTINCT o.id) > 0 THEN COALESCE(SUM(o.total), 0) / COUNT(DISTINCT o.id) ELSE 0 END as avg_ticket,
-              0 as items_sold
-       FROM orders o
-       JOIN tenants t ON t.id = o.tenant_id
-       WHERE ${where}
-       GROUP BY o.tenant_id, t.name
+      `WITH per_order AS (
+         SELECT
+           o.id as oid, o.tenant_id, o.total, o.shipping_cost, o.ml_fee, o.seller_shipping_cost,
+           COALESCE(SUM((item->>'quantity')::int * COALESCE(p.sell_price, 0)), 0) as wholesale_revenue,
+           COALESCE(SUM((item->>'quantity')::int * COALESCE(p.cost_price, 0)), 0) as admin_cost,
+           COALESCE(SUM((item->>'quantity')::int * COALESCE(p.logistics_cost, 0)), 0) as logistics_cost,
+           COALESCE(SUM((item->>'quantity')::int), 0) as items_qty
+         FROM orders o
+         LEFT JOIN LATERAL jsonb_array_elements(COALESCE(o.items, '[]'::jsonb)) item ON TRUE
+         LEFT JOIN products p ON p.id = (item->>'product_id')::uuid
+         WHERE ${where}
+         GROUP BY o.id
+       )
+       SELECT po.tenant_id, t.name as tenant_name,
+              COUNT(DISTINCT po.oid) as order_count,
+              COALESCE(SUM(po.items_qty), 0) as items_sold,
+              COALESCE(SUM(po.wholesale_revenue), 0) as total_revenue,
+              COALESCE(SUM(po.total), 0) as gmv,
+              COALESCE(SUM(po.admin_cost), 0) as total_cost,
+              COALESCE(SUM(po.logistics_cost), 0) as total_logistics,
+              COALESCE(SUM(po.ml_fee), 0) as total_ml_fees,
+              COALESCE(SUM(po.seller_shipping_cost), 0) as total_seller_shipping,
+              COALESCE(SUM(po.shipping_cost), 0) as total_buyer_shipping,
+              COALESCE(SUM(po.wholesale_revenue), 0) - COALESCE(SUM(po.admin_cost), 0) as total_net,
+              CASE WHEN COUNT(DISTINCT po.oid) > 0
+                   THEN COALESCE(SUM(po.total), 0) / COUNT(DISTINCT po.oid)
+                   ELSE 0 END as avg_ticket
+       FROM per_order po
+       JOIN tenants t ON t.id = po.tenant_id
+       GROUP BY po.tenant_id, t.name
        ORDER BY total_revenue DESC`,
       params
     );
@@ -117,11 +143,11 @@ export async function registerAnalyticsRoutes(app: FastifyInstance) {
     // For CTE-internal references (no `p.` prefix because columns are projected through the CTE)
     const costColCTE = isAdmin ? 'cost_price' : 'sell_price';
 
-    // Totals — compute real cost (per item × quantity), logistics (admin only), and avg ticket
+    // Totals — admin sees wholesale margin, seller sees retail margin minus ML fees and shipping
     // Use LEFT JOIN LATERAL so orders without items still count for revenue/orders
     const totalsRow = await queryOne(
       `WITH base_orders AS (
-         SELECT o.id as oid, o.total, o.shipping_cost
+         SELECT o.id as oid, o.total, o.shipping_cost, o.ml_fee, o.seller_shipping_cost
          FROM orders o
          WHERE ${where}
        ),
@@ -133,13 +159,19 @@ export async function registerAnalyticsRoutes(app: FastifyInstance) {
          WHERE ${where}
        )
        SELECT
-         (SELECT COALESCE(SUM(total), 0) FROM base_orders) as revenue,
+         -- For admin: revenue is wholesale (sell_price × qty); for seller: revenue is GMV (o.total)
+         ${isAdmin
+           ? `(SELECT COALESCE(SUM((item->>'quantity')::int * COALESCE(sell_price, 0)), 0) FROM order_items WHERE item IS NOT NULL)`
+           : `(SELECT COALESCE(SUM(total), 0) FROM base_orders)`} as revenue,
+         -- GMV is always sellers' end-customer revenue (informational for admin, same as revenue for seller)
+         (SELECT COALESCE(SUM(total), 0) FROM base_orders) as gmv,
          (SELECT COALESCE(SUM((item->>'quantity')::int * COALESCE(${costColCTE}, 0)), 0)
             FROM order_items WHERE item IS NOT NULL) as cost,
          (SELECT COALESCE(SUM((item->>'quantity')::int * COALESCE(logistics_cost, 0)), 0)
             FROM order_items WHERE item IS NOT NULL) as logistics_cost,
-         (SELECT COALESCE(SUM(shipping_cost), 0) FROM base_orders) as shipping,
-         0 as fees,
+         (SELECT COALESCE(SUM(ml_fee), 0) FROM base_orders) as ml_fees,
+         (SELECT COALESCE(SUM(seller_shipping_cost), 0) FROM base_orders) as seller_shipping,
+         (SELECT COALESCE(SUM(shipping_cost), 0) FROM base_orders) as buyer_shipping,
          (SELECT COUNT(*) FROM base_orders) as orders,
          (SELECT COALESCE(SUM((item->>'quantity')::int), 0)
             FROM order_items WHERE item IS NOT NULL) as items_sold,
@@ -150,11 +182,17 @@ export async function registerAnalyticsRoutes(app: FastifyInstance) {
     );
 
     const totalRevenue = Number(totalsRow?.revenue || 0);
+    const totalGmv = Number(totalsRow?.gmv || 0);
     const totalCost = Number(totalsRow?.cost || 0);
     const totalLogistics = isAdmin ? Number(totalsRow?.logistics_cost || 0) : 0;
-    // For admin: net = revenue - cost (cost already includes logistics)
-    // For seller: net = revenue - cost (their cost = sell_price)
-    const totalNet = totalRevenue - totalCost;
+    const totalMlFees = Number(totalsRow?.ml_fees || 0);
+    const totalSellerShipping = Number(totalsRow?.seller_shipping || 0);
+    const totalBuyerShipping = Number(totalsRow?.buyer_shipping || 0);
+    // Admin: net = revenue (wholesale) − cost (real cost); ML fees and shipping are seller's, not admin's.
+    // Seller: net = revenue (GMV) − cost (sell_price they paid admin) − ML fees − their shipping costs.
+    const totalNet = isAdmin
+      ? totalRevenue - totalCost
+      : totalRevenue - totalCost - totalMlFees - totalSellerShipping;
 
     // Sales by SKU — unnest JSONB items array
     const skuParams = [...params];
@@ -167,17 +205,24 @@ export async function registerAnalyticsRoutes(app: FastifyInstance) {
     // Admin gets logistics_cost column; seller gets 0
     const logisticsCol = isAdmin ? 'p.logistics_cost' : '0::numeric';
 
+    // For admin: revenue per SKU/category = sell_price × qty (wholesale).
+    // For seller: revenue per SKU/category = unit_price × qty (GMV).
+    const skuRevenueExpr = isAdmin
+      ? `SUM((item->>'quantity')::int * COALESCE(p.sell_price, 0))`
+      : `SUM((item->>'quantity')::int * COALESCE((item->>'unit_price')::numeric, 0))`;
+
     const salesBySku = await queryMany(
       `SELECT
          COALESCE(item->>'sku', 'SEM-SKU') as sku,
          COALESCE(item->>'product_name', 'Produto') as product_name,
          SUM((item->>'quantity')::int) as quantity_sold,
-         SUM((item->>'quantity')::int * COALESCE((item->>'unit_price')::numeric, 0)) as revenue,
+         ${skuRevenueExpr} as revenue,
+         SUM((item->>'quantity')::int * COALESCE((item->>'unit_price')::numeric, 0)) as gmv,
          COALESCE(SUM((item->>'quantity')::int * COALESCE(${costCol}, 0)), 0) as cost,
          COALESCE(SUM((item->>'quantity')::int * COALESCE(${logisticsCol}, 0)), 0) as logistics_cost,
-         COALESCE(SUM(o.shipping_cost), 0) as shipping,
+         0 as shipping,
          0 as fees,
-         SUM((item->>'quantity')::int * COALESCE((item->>'unit_price')::numeric, 0))
+         ${skuRevenueExpr}
            - COALESCE(SUM((item->>'quantity')::int * COALESCE(${costCol}, 0)), 0) as net,
          COUNT(DISTINCT o.id) as order_count
        FROM orders o,
@@ -190,16 +235,17 @@ export async function registerAnalyticsRoutes(app: FastifyInstance) {
       skuParams
     );
 
-    // Sales by category
+    // Sales by category — same revenue logic as SKU
     const salesByCategory = await queryMany(
       `SELECT
          COALESCE(p.category, p.ml_category_id, 'Sem Categoria') as category_id,
          COALESCE(p.category, p.ml_category_id, 'Sem Categoria') as category_name,
          SUM((item->>'quantity')::int) as quantity_sold,
-         SUM((item->>'quantity')::int * COALESCE((item->>'unit_price')::numeric, 0)) as revenue,
+         ${skuRevenueExpr} as revenue,
+         SUM((item->>'quantity')::int * COALESCE((item->>'unit_price')::numeric, 0)) as gmv,
          COALESCE(SUM((item->>'quantity')::int * COALESCE(${costCol}, 0)), 0) as cost,
          COALESCE(SUM((item->>'quantity')::int * COALESCE(${logisticsCol}, 0)), 0) as logistics_cost,
-         SUM((item->>'quantity')::int * COALESCE((item->>'unit_price')::numeric, 0))
+         ${skuRevenueExpr}
            - COALESCE(SUM((item->>'quantity')::int * COALESCE(${costCol}, 0)), 0) as net,
          COUNT(DISTINCT p.id) as product_count
        FROM orders o,
@@ -219,12 +265,17 @@ export async function registerAnalyticsRoutes(app: FastifyInstance) {
       operatorProductivity: [],
       dailyTrend,
       totals: {
-        revenue: totalRevenue,
-        cost: totalCost,
+        revenue: totalRevenue,           // admin: wholesale (sell_price × qty); seller: GMV (o.total)
+        gmv: totalGmv,                   // sellers' GMV — informational for admin
+        cost: totalCost,                 // admin: cost_price × qty; seller: sell_price × qty
         logisticsCost: totalLogistics,
         realProductCost: isAdmin ? totalCost - totalLogistics : totalCost,
-        shipping: Number(totalsRow?.shipping || 0),
-        fees: Number(totalsRow?.fees || 0),
+        mlFees: totalMlFees,             // ML commissions paid by sellers
+        sellerShipping: totalSellerShipping, // shipping borne by seller (ME2 list_cost)
+        buyerShipping: totalBuyerShipping,   // shipping paid by buyer (shipments.cost)
+        // Backward-compat aliases — frontend antigo continua funcionando até o redesign
+        shipping: totalSellerShipping,
+        fees: totalMlFees,
         net: totalNet,
         orders: Number(totalsRow?.orders || 0),
         itemsSold: Number(totalsRow?.items_sold || 0),
